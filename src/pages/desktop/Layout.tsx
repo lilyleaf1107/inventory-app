@@ -1,0 +1,174 @@
+import { useState } from 'react'
+import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import {
+  LayoutDashboard,
+  Package,
+  FolderOpen,
+  Warehouse,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  Search,
+  List,
+  Users,
+  Settings,
+  LogOut,
+  Menu,
+  X,
+  AlertTriangle,
+} from 'lucide-react'
+import { useAuthStore } from '@/store/auth'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
+import { useOutOfStock } from '@/hooks/useOutOfStock'
+
+interface NavItem {
+  to: string
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+  disabled?: boolean
+  badge?: number
+}
+
+const navItems: NavItem[] = [
+  { to: '/dashboard', label: '工作台', icon: LayoutDashboard },
+  { to: '/products', label: '产品管理', icon: Package },
+  { to: '/categories', label: '分类管理', icon: FolderOpen },
+  { to: '/warehouses', label: '仓库管理', icon: Warehouse },
+  { to: '/stock-in', label: '入库', icon: ArrowDownToLine },
+  { to: '/stock-out', label: '出库', icon: ArrowUpFromLine },
+  { to: '/inventory', label: '库存查询', icon: Search },
+  { to: '/out-of-stock', label: '缺货提醒', icon: AlertTriangle },
+  { to: '/moves', label: '进出库记录', icon: List },
+]
+
+const adminItems: NavItem[] = [
+  { to: '/users', label: '用户管理', icon: Users },
+  { to: '/settings', label: '设置', icon: Settings, disabled: true },
+]
+
+export default function DesktopLayout() {
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const { profile, signOut, isAdmin } = useAuthStore()
+  const navigate = useNavigate()
+  const { data: outOfStockItems } = useOutOfStock()
+  const outOfStockCount = outOfStockItems?.length || 0
+
+  const handleSignOut = async () => {
+    await signOut()
+    navigate('/login')
+  }
+
+  return (
+    <div className="flex h-screen bg-muted/30">
+      {/* Sidebar */}
+      <aside
+        className={cn(
+          'flex flex-col border-r bg-background transition-all duration-200',
+          sidebarOpen ? 'w-60' : 'w-0 overflow-hidden',
+        )}
+      >
+        <div className="flex h-14 items-center px-4 border-b">
+          <h1 className="font-bold text-lg">进出库管理</h1>
+        </div>
+        <nav className="flex-1 space-y-1 p-2 overflow-y-auto">
+          {navItems.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.disabled ? '#' : item.to}
+              onClick={(e) => item.disabled && e.preventDefault()}
+              className={({ isActive }) =>
+                cn(
+                  'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                  isActive && !item.disabled
+                    ? 'bg-primary text-primary-foreground'
+                    : 'hover:bg-muted',
+                  item.disabled && 'opacity-50 cursor-not-allowed',
+                )
+              }
+            >
+              <item.icon className="h-4 w-4" />
+              <span className="flex-1">{item.label}</span>
+              {item.to === '/out-of-stock' && outOfStockCount > 0 && (
+                <span className="inline-flex items-center justify-center h-5 min-w-[1.25rem] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold">
+                  {outOfStockCount > 99 ? '99+' : outOfStockCount}
+                </span>
+              )}
+            </NavLink>
+          ))}
+
+          {isAdmin() && (
+            <>
+              <div className="mt-6 mb-2 px-3 text-xs font-medium text-muted-foreground">
+                管理员
+              </div>
+              {adminItems.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.disabled ? '#' : item.to}
+                  onClick={(e) => item.disabled && e.preventDefault()}
+                  className={({ isActive }) =>
+                    cn(
+                      'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                      isActive && !item.disabled
+                        ? 'bg-primary text-primary-foreground'
+                        : 'hover:bg-muted',
+                      item.disabled && 'opacity-50 cursor-not-allowed',
+                    )
+                  }
+                >
+                  <item.icon className="h-4 w-4" />
+                  {item.label}
+                </NavLink>
+              ))}
+            </>
+          )}
+        </nav>
+        <div className="border-t p-3 space-y-2">
+          <div className="flex items-center gap-3 px-2 py-1">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
+              <span className="text-xs font-medium">
+                {profile?.name?.charAt(0) || '?'}
+              </span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate">
+                {profile?.name || '未命名'}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {profile?.role === 'admin' ? '管理员' : '员工'}
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start"
+            onClick={handleSignOut}
+          >
+            <LogOut className="h-4 w-4 mr-2" />
+            退出登录
+          </Button>
+        </div>
+      </aside>
+
+      {/* Main */}
+      <div className="flex-1 flex flex-col min-w-0">
+        <header className="flex h-14 items-center gap-4 border-b bg-background px-4">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+          >
+            {sidebarOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+          </Button>
+          <div className="font-medium">
+            工作台
+          </div>
+        </header>
+        <main className="flex-1 overflow-y-auto p-6">
+          <Outlet />
+        </main>
+      </div>
+    </div>
+  )
+}
