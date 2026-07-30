@@ -19,6 +19,7 @@ import {
   deleteProductImage,
 } from '@/lib/supabase'
 import type { Product, Category as CategoryType, Tag as TagType } from '@/types'
+import { getLowStockLevel, getLowStockLevelColor } from '@/hooks/useLowStock'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -58,6 +59,8 @@ interface ProductForm {
   imagePreview: string | null
   selectedTagIds: string[]
   newTagName: string
+  minStock: number
+  isMaterialArea: boolean
 }
 
 const emptyForm: ProductForm = {
@@ -72,6 +75,8 @@ const emptyForm: ProductForm = {
   imagePreview: null,
   selectedTagIds: [],
   newTagName: '',
+  minStock: 0,
+  isMaterialArea: false,
 }
 
 function getTagColor(index: number) {
@@ -117,6 +122,25 @@ export default function MobileProducts() {
     },
   })
 
+  // 每个产品的总库存汇总
+  const { data: productQtyMap } = useQuery({
+    queryKey: ['products-qty-map'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('inventory')
+        .select('product_id, quantity')
+      if (error) throw error
+      const map = new Map<string, number>()
+      for (const row of data || []) {
+        const qty = Number((row as any).quantity) || 0
+        const pid = (row as any).product_id as string
+        map.set(pid, (map.get(pid) || 0) + qty)
+      }
+      return map
+    },
+    staleTime: 30 * 1000,
+  })
+
   const { data: products, isLoading } = useQuery({
     queryKey: ['products', search, categoryFilter],
     queryFn: async () => {
@@ -160,6 +184,8 @@ export default function MobileProducts() {
           unit: data.unit,
           image_path: imagePath,
           description: data.description || null,
+          min_stock: data.minStock || 0,
+          is_material_area: data.isMaterialArea,
         })
         .select()
         .single()
@@ -213,6 +239,8 @@ export default function MobileProducts() {
           image_path: imagePath,
           description: data.form.description || null,
           updated_at: new Date().toISOString(),
+          min_stock: data.form.minStock || 0,
+          is_material_area: data.form.isMaterialArea,
         })
         .eq('id', data.id)
       if (error) throw error
@@ -296,6 +324,8 @@ export default function MobileProducts() {
       imagePreview: product.image_path ? getProductImageUrl(product.image_path) : null,
       selectedTagIds: [],
       newTagName: '',
+      minStock: product.min_stock || 0,
+      isMaterialArea: product.is_material_area || false,
     })
 
     const { data: productTags, error } = await supabase
@@ -454,8 +484,17 @@ export default function MobileProducts() {
         ) : (
           products?.map((p) => {
             const productTags = getProductTags(p)
+            const totalQty = productQtyMap?.get(p.id) || 0
+            const isMaterial = p.is_material_area
+            const isOutOfStock = p.min_stock >= 0 && totalQty === 0
+            const lowStockLevel = getLowStockLevel(totalQty, p.min_stock)
+            const lowStockColor = getLowStockLevelColor(lowStockLevel)
+            const hasLowStock = lowStockLevel !== 'normal' && !isOutOfStock
+            let cardClass = ''
+            if (isOutOfStock && p.min_stock > 0) cardClass = 'bg-red-50/40'
+            else if (hasLowStock) cardClass = lowStockColor.bg
             return (
-              <Card key={p.id}>
+              <Card key={p.id} className={cardClass}>
                 <CardContent className="p-3">
                   <div className="flex gap-3">
                     {p.image_path ? (
@@ -471,7 +510,24 @@ export default function MobileProducts() {
                     )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
-                        <div className="font-medium text-sm truncate flex-1">{p.name}</div>
+                        <div className="font-medium text-sm truncate flex-1 flex flex-wrap items-center gap-1">
+                          {p.name}
+                          {isMaterial && (
+                            <span className="px-1 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700">
+                              物料区
+                            </span>
+                          )}
+                          {isOutOfStock && p.min_stock > 0 && (
+                            <span className="px-1 py-0.5 rounded text-[10px] font-medium bg-red-100 text-red-700">
+                              缺货
+                            </span>
+                          )}
+                          {hasLowStock && (
+                            <span className={`px-1 py-0.5 rounded text-[10px] font-medium border ${lowStockColor.border} ${lowStockColor.text} ${lowStockColor.bg}`}>
+                              {lowStockColor.label}
+                            </span>
+                          )}
+                        </div>
                         <div className="flex gap-0.5 flex-shrink-0">
                           <button
                             onClick={() => openEdit(p)}
@@ -591,6 +647,33 @@ export default function MobileProducts() {
                     value={form.unit}
                     onChange={(e) => setForm({ ...form, unit: e.target.value })}
                   />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="minStock">最低库存预警值</Label>
+                <Input
+                  id="minStock"
+                  type="number"
+                  min="0"
+                  value={form.minStock}
+                  onChange={(e) => setForm({ ...form, minStock: Number(e.target.value) })}
+                  placeholder="0 表示不预警"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>物料区</Label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="isMaterialArea"
+                    checked={form.isMaterialArea}
+                    onChange={(e) => setForm({ ...form, isMaterialArea: e.target.checked })}
+                    className="h-4 w-4 rounded border-input"
+                  />
+                  <label htmlFor="isMaterialArea" className="text-sm text-muted-foreground">
+                    物料区商品（不显示具体数量）
+                  </label>
                 </div>
               </div>
 

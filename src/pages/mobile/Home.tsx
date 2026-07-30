@@ -8,29 +8,21 @@ import {
   Package,
   TrendingUp,
   TrendingDown,
-  Clock,
-  MapPin,
   ChevronRight,
   AlertTriangle,
+  Warehouse,
+  Gauge,
+  Boxes,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
-import { formatDate } from '@/lib/utils'
 import { Card, CardContent } from '@/components/ui/card'
 import { useOutOfStock } from '@/hooks/useOutOfStock'
-
-interface RecentMove {
-  id: string
-  move_type: 'in' | 'out'
-  quantity: number
-  scan_mode: string
-  created_at: string
-  product: { id: string; name: string; unit: string }
-  location: { id: string; code: string; warehouse: { id: string; code: string; name: string | null } }
-}
+import { useLowStockCount } from '@/hooks/useLowStock'
 
 export default function MobileHome() {
   const { data: outOfStockItems } = useOutOfStock()
   const outOfStockCount = outOfStockItems?.length || 0
+  const lowStockCount = useLowStockCount()
 
   const { data: stats } = useQuery({
     queryKey: ['mobile-stats'],
@@ -63,47 +55,73 @@ export default function MobileHome() {
     },
   })
 
-  const { data: recentMoves } = useQuery({
-    queryKey: ['mobile-recent-moves'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('stock_moves')
-        .select(`
-          id, move_type, quantity, scan_mode, created_at,
-          product:products ( id, name, unit ),
-          location:locations ( id, code, warehouse:warehouses ( id, code, name ) )
-        `)
-        .order('created_at', { ascending: false })
-        .limit(5)
-      if (error) throw error
-      return data as unknown as RecentMove[]
-    },
-  })
-
+  // 功能区：日常高频操作（低明度清新淡雅配色）
   const quickActions = [
     {
       to: '/m/scan?type=in',
       label: '扫码入库',
       icon: ArrowDownToLine,
-      color: 'bg-green-500',
+      iconClass: 'text-emerald-600',
+      bgClass: 'bg-emerald-50',
     },
     {
       to: '/m/scan?type=out',
       label: '扫码出库',
       icon: ArrowUpFromLine,
-      color: 'bg-orange-500',
+      iconClass: 'text-amber-600',
+      bgClass: 'bg-amber-50',
     },
     {
       to: '/m/inventory',
       label: '查库存',
       icon: Search,
-      color: 'bg-blue-500',
+      iconClass: 'text-sky-600',
+      bgClass: 'bg-sky-50',
     },
     {
       to: '/m/scan',
       label: '扫一扫',
       icon: ScanLine,
-      color: 'bg-purple-500',
+      iconClass: 'text-violet-600',
+      bgClass: 'bg-violet-50',
+    },
+  ]
+
+  // 管理入口
+  const manageEntries = [
+    {
+      to: '/m/products',
+      label: '产品管理',
+      desc: '维护产品信息',
+      icon: Package,
+      iconClass: 'text-sky-600',
+      bgClass: 'bg-sky-50',
+    },
+    {
+      to: '/m/warehouses',
+      label: '仓库管理',
+      desc: '仓库与库位',
+      icon: Warehouse,
+      iconClass: 'text-indigo-600',
+      bgClass: 'bg-indigo-50',
+    },
+    {
+      to: '/m/out-of-stock',
+      label: '缺货提醒',
+      desc: outOfStockCount > 0 ? `${outOfStockCount} 个缺货` : '暂无缺货',
+      icon: AlertTriangle,
+      iconClass: outOfStockCount > 0 ? 'text-red-600' : 'text-slate-500',
+      bgClass: outOfStockCount > 0 ? 'bg-red-50' : 'bg-slate-50',
+      badge: outOfStockCount > 0 ? outOfStockCount : undefined,
+    },
+    {
+      to: '/m/low-stock',
+      label: '低库存预警',
+      desc: lowStockCount.total > 0 ? `${lowStockCount.total} 个预警` : '库存充足',
+      icon: Gauge,
+      iconClass: lowStockCount.total > 0 ? 'text-orange-600' : 'text-slate-500',
+      bgClass: lowStockCount.total > 0 ? 'bg-orange-50' : 'bg-slate-50',
+      badge: lowStockCount.total > 0 ? lowStockCount.total : undefined,
     },
   ]
 
@@ -131,6 +149,28 @@ export default function MobileHome() {
         </Link>
       )}
 
+      {/* 低库存提示 */}
+      {lowStockCount.total > 0 && (
+        <Link to="/m/low-stock">
+          <Card className="border-orange-200 bg-orange-50/40">
+            <CardContent className="p-3 flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-100 flex-shrink-0">
+                <Gauge className="h-5 w-5 text-orange-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-orange-700">
+                  {lowStockCount.total} 个商品低库存预警
+                </div>
+                <div className="text-xs text-orange-500/80">
+                  黄色 {lowStockCount.warning} · 橙色 {lowStockCount.danger} · 红色 {lowStockCount.critical}
+                </div>
+              </div>
+              <ChevronRight className="h-4 w-4 text-orange-400 flex-shrink-0" />
+            </CardContent>
+          </Card>
+        </Link>
+      )}
+
       {/* 统计卡片 */}
       <div className="grid grid-cols-2 gap-3">
         <Card>
@@ -145,7 +185,7 @@ export default function MobileHome() {
         <Card>
           <CardContent className="p-3">
             <div className="flex items-center gap-2 text-muted-foreground text-xs">
-              <Search className="h-3 w-3" />
+              <Boxes className="h-3 w-3" />
               库存数量
             </div>
             <div className="text-xl font-bold mt-1">
@@ -156,10 +196,10 @@ export default function MobileHome() {
         <Card>
           <CardContent className="p-3">
             <div className="flex items-center gap-2 text-muted-foreground text-xs">
-              <TrendingUp className="h-3 w-3 text-green-500" />
+              <TrendingUp className="h-3 w-3 text-emerald-500" />
               本周入库
             </div>
-            <div className="text-xl font-bold mt-1 text-green-600">
+            <div className="text-xl font-bold mt-1 text-emerald-600">
               +{stats?.weekIn || 0}
             </div>
           </CardContent>
@@ -167,19 +207,19 @@ export default function MobileHome() {
         <Card>
           <CardContent className="p-3">
             <div className="flex items-center gap-2 text-muted-foreground text-xs">
-              <TrendingDown className="h-3 w-3 text-orange-500" />
+              <TrendingDown className="h-3 w-3 text-amber-500" />
               本周出库
             </div>
-            <div className="text-xl font-bold mt-1 text-orange-600">
+            <div className="text-xl font-bold mt-1 text-amber-600">
               -{stats?.weekOut || 0}
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* 快捷操作 */}
+      {/* 功能区 */}
       <div>
-        <h2 className="text-sm font-medium text-muted-foreground mb-3">快捷操作</h2>
+        <h2 className="text-sm font-medium text-muted-foreground mb-3">功能区</h2>
         <div className="grid grid-cols-4 gap-3">
           {quickActions.map((action) => (
             <Link
@@ -187,7 +227,7 @@ export default function MobileHome() {
               to={action.to}
               className="flex flex-col items-center gap-2"
             >
-              <div className={`flex h-14 w-14 items-center justify-center rounded-2xl ${action.color} text-white shadow-md`}>
+              <div className={`flex h-14 w-14 items-center justify-center rounded-2xl ${action.bgClass} ${action.iconClass} shadow-sm`}>
                 <action.icon className="h-6 w-6" />
               </div>
               <span className="text-xs text-center">{action.label}</span>
@@ -196,83 +236,33 @@ export default function MobileHome() {
         </div>
       </div>
 
-      {/* 最近操作 */}
+      {/* 管理入口 */}
       <div>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-medium text-muted-foreground">最近操作</h2>
-          <Link to="/m/moves" className="text-xs text-primary flex items-center">
-            全部
-            <ChevronRight className="h-3 w-3" />
-          </Link>
-        </div>
+        <h2 className="text-sm font-medium text-muted-foreground mb-3">管理</h2>
         <div className="space-y-2">
-          {!recentMoves || recentMoves.length === 0 ? (
-            <div className="text-center py-6 text-sm text-muted-foreground">
-              暂无操作记录
-            </div>
-          ) : (
-            recentMoves.map((m) => (
-              <div
-                key={m.id}
-                className="flex items-center gap-3 p-3 bg-background rounded-lg border"
-              >
-                <div
-                  className={`flex h-8 w-8 items-center justify-center rounded-full flex-shrink-0 ${
-                    m.move_type === 'in'
-                      ? 'bg-green-50 text-green-600'
-                      : 'bg-orange-50 text-orange-600'
-                  }`}
-                >
-                  {m.move_type === 'in' ? (
-                    <ArrowDownToLine className="h-4 w-4" />
-                  ) : (
-                    <ArrowUpFromLine className="h-4 w-4" />
+          {manageEntries.map((entry) => (
+            <Link key={entry.to} to={entry.to}>
+              <Card className="border-border/60 hover:bg-muted/40 transition-colors">
+                <CardContent className="p-3 flex items-center gap-3">
+                  <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${entry.bgClass} ${entry.iconClass} flex-shrink-0`}>
+                    <entry.icon className="h-5 w-5" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium">{entry.label}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{entry.desc}</div>
+                  </div>
+                  {entry.badge !== undefined && (
+                    <span className="inline-flex items-center justify-center h-5 min-w-[1.25rem] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex-shrink-0">
+                      {entry.badge > 99 ? '99+' : entry.badge}
+                    </span>
                   )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-sm truncate">{m.product.name}</div>
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <MapPin className="h-3 w-3" />
-                    {m.location.warehouse.name || m.location.warehouse.code} · {m.location.code}
-                    <span className="mx-0.5">·</span>
-                    <Clock className="h-3 w-3" />
-                    {formatDate(m.created_at)}
-                  </div>
-                </div>
-                <div className="text-right flex-shrink-0">
-                  <div
-                    className={`font-bold text-sm ${
-                      m.move_type === 'in' ? 'text-green-600' : 'text-orange-600'
-                    }`}
-                  >
-                    {m.move_type === 'in' ? '+' : '-'}
-                    {m.quantity}
-                  </div>
-                  <div className="text-xs text-muted-foreground">{m.product.unit}</div>
-                </div>
-              </div>
-            ))
-          )}
+                  <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                </CardContent>
+              </Card>
+            </Link>
+          ))}
         </div>
       </div>
-
-      {/* 桌面端入口 */}
-      <Card className="bg-primary/5 border-primary/20">
-        <CardContent className="p-3 flex items-center justify-between">
-          <div>
-            <div className="text-sm font-medium">需要管理产品和仓库？</div>
-            <div className="text-xs text-muted-foreground mt-0.5">
-              切换到电脑端完整功能
-            </div>
-          </div>
-          <Link
-            to="/products"
-            className="text-xs text-primary underline"
-          >
-            进入电脑端
-          </Link>
-        </CardContent>
-      </Card>
     </div>
   )
 }

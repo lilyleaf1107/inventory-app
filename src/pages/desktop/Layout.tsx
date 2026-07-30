@@ -15,11 +15,13 @@ import {
   Menu,
   X,
   AlertTriangle,
+  Gauge,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useOutOfStock } from '@/hooks/useOutOfStock'
+import { useLowStockCount } from '@/hooks/useLowStock'
 
 interface NavItem {
   to: string
@@ -38,6 +40,7 @@ const navItems: NavItem[] = [
   { to: '/stock-out', label: '出库', icon: ArrowUpFromLine },
   { to: '/inventory', label: '库存查询', icon: Search },
   { to: '/out-of-stock', label: '缺货提醒', icon: AlertTriangle },
+  { to: '/low-stock', label: '低库存预警', icon: Gauge },
   { to: '/moves', label: '进出库记录', icon: List },
 ]
 
@@ -52,6 +55,7 @@ export default function DesktopLayout() {
   const navigate = useNavigate()
   const { data: outOfStockItems } = useOutOfStock()
   const outOfStockCount = outOfStockItems?.length || 0
+  const lowStockCount = useLowStockCount()
 
   const handleSignOut = async () => {
     await signOut()
@@ -91,6 +95,11 @@ export default function DesktopLayout() {
               {item.to === '/out-of-stock' && outOfStockCount > 0 && (
                 <span className="inline-flex items-center justify-center h-5 min-w-[1.25rem] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold">
                   {outOfStockCount > 99 ? '99+' : outOfStockCount}
+                </span>
+              )}
+              {item.to === '/low-stock' && lowStockCount.total > 0 && (
+                <span className="inline-flex items-center justify-center h-5 min-w-[1.25rem] px-1 rounded-full bg-orange-500 text-white text-[10px] font-bold">
+                  {lowStockCount.total > 99 ? '99+' : lowStockCount.total}
                 </span>
               )}
             </NavLink>

@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Search, ImagePlus, MapPin, AlertTriangle, Clock } from 'lucide-react'
 import { supabase, getProductImageUrl } from '@/lib/supabase'
-import { useOutOfStock, formatOutOfStockDuration, getStockoutLevel } from '@/hooks/useOutOfStock'
+import { useOutOfStock } from '@/hooks/useOutOfStock'
+import { getLowStockLevel, getLowStockLevelColor } from '@/hooks/useLowStock'
 import { Input } from '@/components/ui/input'
 
 interface InventoryItem {
@@ -16,6 +17,8 @@ interface InventoryItem {
     barcode: string | null
     image_path: string | null
     unit: string
+    min_stock: number
+    is_material_area: boolean
   }
   location: {
     id: string
@@ -34,7 +37,7 @@ export default function MobileInventory() {
         .from('inventory')
         .select(`
           id, quantity, batch_no,
-          product:products ( id, name, sku, barcode, image_path, unit ),
+          product:products ( id, name, sku, barcode, image_path, unit, min_stock, is_material_area ),
           location:locations ( id, code, warehouse:warehouses ( id, code, name ) )
         `)
         .order('quantity', { ascending: true })
@@ -72,12 +75,17 @@ export default function MobileInventory() {
         <div className="space-y-2">
           {inventory?.map((item) => {
             const isOutOfStock = item.quantity === 0
+            const isMaterial = item.product.is_material_area
+            const lowStockLevel = getLowStockLevel(item.quantity, item.product.min_stock)
+            const lowStockColor = getLowStockLevelColor(lowStockLevel)
+            const hasLowStock = lowStockLevel !== 'normal' && !isOutOfStock
+            let cardClass = 'bg-background border'
+            if (isOutOfStock) cardClass = 'bg-red-50/60 border-red-200'
+            else if (hasLowStock) cardClass = `${lowStockColor.border} ${lowStockColor.bg}`
             return (
               <div
                 key={item.id}
-                className={`flex items-center gap-3 p-3 rounded-lg border ${
-                  isOutOfStock ? 'bg-red-50/60 border-red-200' : 'bg-background'
-                }`}
+                className={`flex items-center gap-3 p-3 rounded-lg border ${cardClass}`}
               >
                 {item.product.image_path ? (
                   <img
@@ -91,12 +99,22 @@ export default function MobileInventory() {
                   </div>
                 )}
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium text-sm truncate flex items-center gap-1">
+                  <div className="font-medium text-sm truncate flex items-center flex-wrap gap-1">
                     {item.product.name}
+                    {isMaterial && (
+                      <span className="px-1 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700">
+                        物料区
+                      </span>
+                    )}
                     {isOutOfStock && (
                       <span className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[10px] font-medium bg-red-100 text-red-700">
                         <AlertTriangle className="h-2.5 w-2.5" />
                         缺货
+                      </span>
+                    )}
+                    {hasLowStock && (
+                      <span className={`px-1 py-0.5 rounded text-[10px] font-medium border ${lowStockColor.border} ${lowStockColor.text} ${lowStockColor.bg}`}>
+                        {lowStockColor.label}
                       </span>
                     )}
                   </div>
@@ -106,8 +124,14 @@ export default function MobileInventory() {
                   </div>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  <div className={`font-bold ${isOutOfStock ? 'text-red-600' : ''}`}>{item.quantity}</div>
-                  <div className="text-xs text-muted-foreground">{item.product.unit}</div>
+                  {isMaterial ? (
+                    <div className="font-medium text-muted-foreground">***</div>
+                  ) : (
+                    <>
+                      <div className={`font-bold ${isOutOfStock ? 'text-red-600' : ''}`}>{item.quantity}</div>
+                      <div className="text-xs text-muted-foreground">{item.product.unit}</div>
+                    </>
+                  )}
                 </div>
               </div>
             )

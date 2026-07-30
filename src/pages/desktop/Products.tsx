@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { Plus, Search, Edit2, Trash2, ImagePlus, X, Tag } from 'lucide-react'
 import { supabase, getProductImageUrl, uploadProductImage, deleteProductImage } from '@/lib/supabase'
 import type { Product, Category as CategoryType, Tag as TagType } from '@/types'
+import { getLowStockLevel, getLowStockLevelColor } from '@/hooks/useLowStock'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -46,6 +47,8 @@ interface ProductForm {
   spec: string
   unit: string
   description: string
+  minStock: number
+  isMaterialArea: boolean
   imageFile: File | null
   imagePreview: string | null
   selectedTagIds: string[]
@@ -60,6 +63,8 @@ const emptyForm: ProductForm = {
   spec: '',
   unit: '个',
   description: '',
+  minStock: 0,
+  isMaterialArea: false,
   imageFile: null,
   imagePreview: null,
   selectedTagIds: [],
@@ -109,6 +114,25 @@ export default function ProductsPage() {
     },
   })
 
+  // 每个产品的总库存汇总（按产品 id 聚合）
+  const { data: productQtyMap } = useQuery({
+    queryKey: ['products-qty-map'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('inventory')
+        .select('product_id, quantity')
+      if (error) throw error
+      const map = new Map<string, number>()
+      for (const row of data || []) {
+        const qty = Number((row as any).quantity) || 0
+        const pid = (row as any).product_id as string
+        map.set(pid, (map.get(pid) || 0) + qty)
+      }
+      return map
+    },
+    staleTime: 30 * 1000,
+  })
+
   const { data: products, isLoading } = useQuery({
     queryKey: ['products', search, categoryFilter, selectedTagFilter],
     queryFn: async () => {
@@ -153,6 +177,8 @@ export default function ProductsPage() {
           unit: data.unit,
           image_path: imagePath,
           description: data.description || null,
+          min_stock: data.minStock || 0,
+          is_material_area: data.isMaterialArea,
         })
         .select()
         .single()
@@ -202,6 +228,8 @@ export default function ProductsPage() {
           unit: data.form.unit,
           image_path: imagePath,
           description: data.form.description || null,
+          min_stock: data.form.minStock || 0,
+          is_material_area: data.form.isMaterialArea,
           updated_at: new Date().toISOString(),
         })
         .eq('id', data.id)
@@ -282,6 +310,8 @@ export default function ProductsPage() {
       spec: product.spec || '',
       unit: product.unit,
       description: product.description || '',
+      minStock: product.min_stock || 0,
+      isMaterialArea: product.is_material_area || false,
       imageFile: null,
       imagePreview: product.image_path ? getProductImageUrl(product.image_path) : null,
       selectedTagIds: [],
@@ -471,27 +501,38 @@ export default function ProductsPage() {
               <TableHead>标签</TableHead>
               <TableHead>规格</TableHead>
               <TableHead>单位</TableHead>
+              <TableHead>最低库存</TableHead>
+              <TableHead>物料区</TableHead>
               <TableHead className="w-24 text-right">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
                   加载中...
                 </TableCell>
               </TableRow>
             ) : products?.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
                   暂无产品，点击右上角新增
                 </TableCell>
               </TableRow>
             ) : (
               products?.map((p) => {
                 const productTags = getProductTags(p)
+                const totalQty = productQtyMap?.get(p.id) || 0
+                const isMaterial = p.is_material_area
+                const isOutOfStock = p.min_stock >= 0 && totalQty === 0
+                const lowStockLevel = getLowStockLevel(totalQty, p.min_stock)
+                const lowStockColor = getLowStockLevelColor(lowStockLevel)
+                const hasLowStock = lowStockLevel !== 'normal' && !isOutOfStock
+                let rowClass = ''
+                if (isOutOfStock && p.min_stock > 0) rowClass = 'bg-red-50/40'
+                else if (hasLowStock) rowClass = lowStockColor.bg
                 return (
-                  <TableRow key={p.id}>
+                  <TableRow key={p.id} className={rowClass}>
                     <TableCell>
                       {p.image_path ? (
                         <img
@@ -506,7 +547,27 @@ export default function ProductsPage() {
                       )}
                     </TableCell>
                     <TableCell className="font-mono text-xs">{p.sku || '-'}</TableCell>
-                    <TableCell className="font-medium">{p.name}</TableCell>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center flex-wrap gap-1.5">
+                        {p.name}
+                        {isMaterial && (
+                          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-blue-100 text-blue-700">
+                            物料区
+                          </span>
+                        )}
+                        {isOutOfStock && p.min_stock > 0 && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-red-100 text-red-700">
+                            <X className="h-2.5 w-2.5" />
+                            缺货
+                          </span>
+                        )}
+                        {hasLowStock && (
+                          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${lowStockColor.border} ${lowStockColor.text} ${lowStockColor.bg}`}>
+                            {lowStockColor.label}
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">
                       {p.barcode || '-'}
                     </TableCell>
@@ -531,6 +592,12 @@ export default function ProductsPage() {
                     </TableCell>
                     <TableCell>{p.spec || '-'}</TableCell>
                     <TableCell>{p.unit}</TableCell>
+                    <TableCell className="text-muted-foreground">{p.min_stock > 0 ? p.min_stock : '-'}</TableCell>
+                    <TableCell>
+                      {p.is_material_area ? (
+                        <span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">物料区</span>
+                      ) : '-'}
+                    </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
                         <Button variant="ghost" size="icon" onClick={() => openEdit(p)}>
@@ -623,6 +690,32 @@ export default function ProductsPage() {
                   value={form.unit}
                   onChange={(e) => setForm({ ...form, unit: e.target.value })}
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="minStock">最低库存预警值</Label>
+                <Input
+                  id="minStock"
+                  type="number"
+                  min="0"
+                  value={form.minStock}
+                  onChange={(e) => setForm({ ...form, minStock: Number(e.target.value) })}
+                  placeholder="0 表示不预警"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>物料区</Label>
+                <div className="flex items-center gap-2 h-10">
+                  <input
+                    type="checkbox"
+                    id="isMaterialArea"
+                    checked={form.isMaterialArea}
+                    onChange={(e) => setForm({ ...form, isMaterialArea: e.target.checked })}
+                    className="h-4 w-4 rounded border-input"
+                  />
+                  <label htmlFor="isMaterialArea" className="text-sm text-muted-foreground">
+                    标记为物料区商品（仅显示低库存/数据/备注，不显示具体数量）
+                  </label>
+                </div>
               </div>
               <div className="md:col-span-2 space-y-2">
                 <Label>产品标签</Label>

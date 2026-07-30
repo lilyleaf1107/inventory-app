@@ -16,6 +16,7 @@ const DashboardPage = lazy(() => import('@/pages/desktop/Dashboard'))
 const UsersPage = lazy(() => import('@/pages/desktop/Users'))
 const CategoriesPage = lazy(() => import('@/pages/desktop/Categories'))
 const OutOfStockPage = lazy(() => import('@/pages/desktop/OutOfStock'))
+const LowStockPage = lazy(() => import('@/pages/desktop/LowStock'))
 
 const MobileLayout = lazy(() => import('@/pages/mobile/Layout'))
 const MobileHome = lazy(() => import('@/pages/mobile/Home'))
@@ -28,6 +29,7 @@ const MobileWarehouses = lazy(() => import('@/pages/mobile/Warehouses'))
 const MobileCategories = lazy(() => import('@/pages/mobile/Categories'))
 const MobileUsers = lazy(() => import('@/pages/mobile/Users'))
 const MobileOutOfStock = lazy(() => import('@/pages/mobile/OutOfStock'))
+const MobileLowStock = lazy(() => import('@/pages/mobile/LowStock'))
 
 function Loading() {
   return (
@@ -87,6 +89,7 @@ export default function App() {
           <Route path="categories" element={<MobileCategories />} />
           <Route path="users" element={<MobileUsers />} />
           <Route path="out-of-stock" element={<MobileOutOfStock />} />
+          <Route path="low-stock" element={<MobileLowStock />} />
         </Route>
       )}
 
@@ -111,6 +114,7 @@ export default function App() {
         <Route path="moves" element={<StockMovesPage />} />
         <Route path="users" element={<UsersPage />} />
         <Route path="out-of-stock" element={<OutOfStockPage />} />
+        <Route path="low-stock" element={<LowStockPage />} />
       </Route>
     </Routes>
   )

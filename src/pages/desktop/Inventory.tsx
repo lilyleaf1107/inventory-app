@@ -3,7 +3,8 @@ import { useQuery } from '@tanstack/react-query'
 import { Search, ImagePlus, MapPin, Tag, X, AlertTriangle } from 'lucide-react'
 import { supabase, getProductImageUrl } from '@/lib/supabase'
 import type { Category as CategoryType, Tag as TagType } from '@/types'
-import { useOutOfStock, formatOutOfStockDuration, getStockoutLevel } from '@/hooks/useOutOfStock'
+import { useOutOfStock } from '@/hooks/useOutOfStock'
+import { getLowStockLevel, getLowStockLevelColor } from '@/hooks/useLowStock'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import {
@@ -47,6 +48,8 @@ interface InventoryItem {
     image_path: string | null
     unit: string
     category: string | null
+    min_stock: number
+    is_material_area: boolean
   }
   location: {
     id: string
@@ -113,7 +116,7 @@ export default function InventoryPage() {
           quantity,
           batch_no,
           updated_at,
-          product:products ( id, name, sku, barcode, image_path, unit, category ),
+          product:products ( id, name, sku, barcode, image_path, unit, category, min_stock, is_material_area ),
           location:locations (
             id,
             code,
@@ -308,7 +311,13 @@ export default function InventoryPage() {
             ) : (
               inventory?.map((item) => {
                 const isOutOfStock = item.quantity === 0
-                const rowClass = isOutOfStock ? 'bg-red-50/60' : ''
+                const isMaterial = item.product.is_material_area
+                const lowStockLevel = getLowStockLevel(item.quantity, item.product.min_stock)
+                const lowStockColor = getLowStockLevelColor(lowStockLevel)
+                const hasLowStock = lowStockLevel !== 'normal' && !isOutOfStock
+                let rowClass = ''
+                if (isOutOfStock) rowClass = 'bg-red-50/60'
+                else if (hasLowStock) rowClass = lowStockColor.bg
 
                 return (
                   <TableRow key={item.id} className={rowClass}>
@@ -326,12 +335,22 @@ export default function InventoryPage() {
                       )}
                     </TableCell>
                     <TableCell className="font-medium">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center flex-wrap gap-1.5">
                         {item.product.name}
+                        {isMaterial && (
+                          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-blue-100 text-blue-700">
+                            物料区
+                          </span>
+                        )}
                         {isOutOfStock && (
                           <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-red-100 text-red-700">
                             <AlertTriangle className="h-2.5 w-2.5" />
                             缺货
+                          </span>
+                        )}
+                        {hasLowStock && (
+                          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${lowStockColor.border} ${lowStockColor.text} ${lowStockColor.bg}`}>
+                            {lowStockColor.label}
                           </span>
                         )}
                       </div>
@@ -356,12 +375,18 @@ export default function InventoryPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <span className={`font-bold ${isOutOfStock ? 'text-red-600' : ''}`}>
-                        {Number(item.quantity).toLocaleString()}
-                      </span>
-                      <span className="text-xs text-muted-foreground ml-1">
-                        {item.product.unit}
-                      </span>
+                      {isMaterial ? (
+                        <span className="font-medium text-muted-foreground">***</span>
+                      ) : (
+                        <>
+                          <span className={`font-bold ${isOutOfStock ? 'text-red-600' : ''}`}>
+                            {Number(item.quantity).toLocaleString()}
+                          </span>
+                          <span className="text-xs text-muted-foreground ml-1">
+                            {item.product.unit}
+                          </span>
+                        </>
+                      )}
                     </TableCell>
                     <TableCell className="text-sm">
                       {item.batch_no || '-'}
