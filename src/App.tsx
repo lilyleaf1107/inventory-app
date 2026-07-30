@@ -1,48 +1,53 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, lazy, Suspense } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
 import { useDevice } from '@/hooks/useDevice'
 import LoginPage from '@/pages/auth/Login'
-import DesktopLayout from '@/pages/desktop/Layout'
-import ProductsPage from '@/pages/desktop/Products'
-import WarehousesPage from '@/pages/desktop/Warehouses'
-import StockInPage from '@/pages/desktop/StockIn'
-import StockOutPage from '@/pages/desktop/StockOut'
-import InventoryPage from '@/pages/desktop/Inventory'
-import StockMovesPage from '@/pages/desktop/StockMoves'
-import DashboardPage from '@/pages/desktop/Dashboard'
-import UsersPage from '@/pages/desktop/Users'
-import CategoriesPage from '@/pages/desktop/Categories'
-import MobileLayout from '@/pages/mobile/Layout'
-import MobileHome from '@/pages/mobile/Home'
-import MobileScan from '@/pages/mobile/Scan'
-import MobileInventory from '@/pages/mobile/Inventory'
-import MobileMoves from '@/pages/mobile/Moves'
-import MobileProfile from '@/pages/mobile/Profile'
-import MobileProducts from '@/pages/mobile/Products'
-import MobileWarehouses from '@/pages/mobile/Warehouses'
-import MobileCategories from '@/pages/mobile/Categories'
-import MobileUsers from '@/pages/mobile/Users'
-import OutOfStockPage from '@/pages/desktop/OutOfStock'
-import MobileOutOfStock from '@/pages/mobile/OutOfStock'
+
+// 懒加载所有页面组件，减小初始包体积
+const DesktopLayout = lazy(() => import('@/pages/desktop/Layout'))
+const ProductsPage = lazy(() => import('@/pages/desktop/Products'))
+const WarehousesPage = lazy(() => import('@/pages/desktop/Warehouses'))
+const StockInPage = lazy(() => import('@/pages/desktop/StockIn'))
+const StockOutPage = lazy(() => import('@/pages/desktop/StockOut'))
+const InventoryPage = lazy(() => import('@/pages/desktop/Inventory'))
+const StockMovesPage = lazy(() => import('@/pages/desktop/StockMoves'))
+const DashboardPage = lazy(() => import('@/pages/desktop/Dashboard'))
+const UsersPage = lazy(() => import('@/pages/desktop/Users'))
+const CategoriesPage = lazy(() => import('@/pages/desktop/Categories'))
+const OutOfStockPage = lazy(() => import('@/pages/desktop/OutOfStock'))
+
+const MobileLayout = lazy(() => import('@/pages/mobile/Layout'))
+const MobileHome = lazy(() => import('@/pages/mobile/Home'))
+const MobileScan = lazy(() => import('@/pages/mobile/Scan'))
+const MobileInventory = lazy(() => import('@/pages/mobile/Inventory'))
+const MobileMoves = lazy(() => import('@/pages/mobile/Moves'))
+const MobileProfile = lazy(() => import('@/pages/mobile/Profile'))
+const MobileProducts = lazy(() => import('@/pages/mobile/Products'))
+const MobileWarehouses = lazy(() => import('@/pages/mobile/Warehouses'))
+const MobileCategories = lazy(() => import('@/pages/mobile/Categories'))
+const MobileUsers = lazy(() => import('@/pages/mobile/Users'))
+const MobileOutOfStock = lazy(() => import('@/pages/mobile/OutOfStock'))
+
+function Loading() {
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+    </div>
+  )
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuthStore()
   const location = useLocation()
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-      </div>
-    )
-  }
+  if (loading) return <Loading />
 
   if (!user) {
     return <Navigate to="/login" state={{ from: location }} replace />
   }
 
-  return <>{children}</>
+  return <Suspense fallback={<Loading />}>{children}</Suspense>
 }
 
 export default function App() {
@@ -55,11 +60,7 @@ export default function App() {
   }, [checkAuth])
 
   if (!init && loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-      </div>
-    )
+    return <Loading />
   }
 
   return (
@@ -85,6 +86,7 @@ export default function App() {
           <Route path="warehouses" element={<MobileWarehouses />} />
           <Route path="categories" element={<MobileCategories />} />
           <Route path="users" element={<MobileUsers />} />
+          <Route path="out-of-stock" element={<MobileOutOfStock />} />
         </Route>
       )}
 
