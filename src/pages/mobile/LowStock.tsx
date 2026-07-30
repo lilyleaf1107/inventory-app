@@ -63,7 +63,7 @@ export default function MobileLowStock() {
               <div className="text-muted-foreground text-sm">暂无低库存预警</div>
             </div>
           ) : (
-            lowStockItems.map((item) => {
+            lowStockItems?.map((item) => {
               const level = getLowStockLevel(item.quantity, item.minStock)
               const color = getLowStockLevelColor(level)
               const isMaterial = (item.product as any).is_material_area
