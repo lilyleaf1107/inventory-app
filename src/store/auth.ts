@@ -10,7 +10,13 @@ interface AuthState {
   signIn: (account: string, password: string) => Promise<void>
   signUp: (account: string, password: string, name: string) => Promise<void>
   signOut: () => Promise<void>
+  // 权限判断（向后兼容）
   isAdmin: () => boolean
+  // 新增权限判断
+  isSuperAdmin: () => boolean
+  canWrite: () => boolean
+  canManageUsers: () => boolean
+  canViewMoves: () => boolean
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -52,13 +58,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       },
     })
     if (error) throw error
-    if (user) {
-      await supabase.from('profiles').upsert({
-        id: user.id,
-        name,
-        role: 'staff',
-      })
-    }
+    // profile 由数据库触发器自动创建，无需前端 upsert
     await get().checkAuth()
   },
 
@@ -67,7 +67,39 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ user: null, profile: null })
   },
 
+  // 向后兼容：管理员及以上（含超管）能管理用户
   isAdmin: () => {
-    return get().profile?.role === 'admin'
+    const role = get().profile?.role
+    return role === 'admin' || role === 'super_admin'
+  },
+
+  isSuperAdmin: () => {
+    return get().profile?.role === 'super_admin'
+  },
+
+  // 库管及以上可写入
+  canWrite: () => {
+    const role = get().profile?.role
+    return (
+      role === 'super_admin' ||
+      role === 'admin' ||
+      role === 'warehouse_manager'
+    )
+  },
+
+  // 管理员及以上可管理用户
+  canManageUsers: () => {
+    const role = get().profile?.role
+    return role === 'admin' || role === 'super_admin'
+  },
+
+  // 库管及以上可查看进出库记录
+  canViewMoves: () => {
+    const role = get().profile?.role
+    return (
+      role === 'super_admin' ||
+      role === 'admin' ||
+      role === 'warehouse_manager'
+    )
   },
 }))

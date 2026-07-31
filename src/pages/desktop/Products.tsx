@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { Plus, Search, Edit2, Trash2, ImagePlus, X, Tag } from 'lucide-react'
 import { supabase, getProductImageUrl, uploadProductImage, deleteProductImage } from '@/lib/supabase'
 import type { Product, Category as CategoryType, Tag as TagType } from '@/types'
+import { useAuthStore } from '@/store/auth'
 import { getLowStockLevel, getLowStockLevelColor } from '@/hooks/useLowStock'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -81,6 +82,7 @@ interface ProductWithTags extends Product {
 
 export default function ProductsPage() {
   const queryClient = useQueryClient()
+  const { canWrite } = useAuthStore()
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
   const [selectedTagFilter, setSelectedTagFilter] = useState<string[]>([])
@@ -431,10 +433,12 @@ export default function ProductsPage() {
           <h2 className="text-2xl font-bold tracking-tight">产品管理</h2>
           <p className="text-sm text-muted-foreground">管理所有产品信息和图片</p>
         </div>
-        <Button onClick={openCreate}>
-          <Plus className="mr-2 h-4 w-4" />
-          新增产品
-        </Button>
+        {canWrite() && (
+          <Button onClick={openCreate}>
+            <Plus className="mr-2 h-4 w-4" />
+            新增产品
+          </Button>
+        )}
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">
@@ -599,19 +603,23 @@ export default function ProductsPage() {
                       ) : '-'}
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex justify-end gap-1">
-                        <Button variant="ghost" size="icon" onClick={() => openEdit(p)}>
-                          <Edit2 className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="text-destructive hover:text-destructive"
-                          onClick={() => handleDelete(p)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
+                      {canWrite() ? (
+                        <div className="flex justify-end gap-1">
+                          <Button variant="ghost" size="icon" onClick={() => openEdit(p)}>
+                            <Edit2 className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-destructive hover:text-destructive"
+                            onClick={() => handleDelete(p)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">只读</span>
+                      )}
                     </TableCell>
                   </TableRow>
                 )

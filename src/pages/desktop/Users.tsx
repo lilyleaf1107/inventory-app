@@ -1,8 +1,14 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Users, Shield, User } from 'lucide-react'
+import { Users, Shield, User, UserCog, Crown } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
+import type { UserRole } from '@/types'
+import {
+  ROLE_LABELS,
+  canChangeRoleOf,
+  canAssignRole,
+} from '@/lib/permissions'
 import {
   Table,
   TableBody,
@@ -25,15 +31,37 @@ import {
 interface UserProfile {
   id: string
   name: string | null
-  role: 'admin' | 'staff'
+  role: UserRole
   created_at: string
 }
+
+const ROLE_ICONS: Record<UserRole, React.ComponentType<{ className?: string }>> = {
+  super_admin: Crown,
+  admin: Shield,
+  warehouse_manager: UserCog,
+  staff: User,
+}
+
+const ROLE_COLORS: Record<UserRole, string> = {
+  super_admin: 'text-purple-600',
+  admin: 'text-primary',
+  warehouse_manager: 'text-blue-600',
+  staff: 'text-muted-foreground',
+}
+
+// 可分配的角色（按等级降序）
+const ASSIGNABLE_ROLES: UserRole[] = [
+  'super_admin',
+  'admin',
+  'warehouse_manager',
+  'staff',
+]
 
 export default function UsersPage() {
   const queryClient = useQueryClient()
   const { profile } = useAuthStore()
   const [confirmUser, setConfirmUser] = useState<UserProfile | null>(null)
-  const [confirmRole, setConfirmRole] = useState<'admin' | 'staff'>('staff')
+  const [confirmRole, setConfirmRole] = useState<UserRole>('staff')
 
   const { data: users, isLoading } = useQuery({
     queryKey: ['profiles'],
@@ -48,7 +76,7 @@ export default function UsersPage() {
   })
 
   const updateRole = useMutation({
-    mutationFn: async ({ id, role }: { id: string; role: 'admin' | 'staff' }) => {
+    mutationFn: async ({ id, role }: { id: string; role: UserRole }) => {
       const { error } = await supabase
         .from('profiles')
         .update({ role })
@@ -61,15 +89,12 @@ export default function UsersPage() {
     },
   })
 
-  const adminCount = users?.filter((u) => u.role === 'admin').length || 0
-  const isSelf = (id: string) => id === profile?.id
-  const canDemote = (u: UserProfile) => {
-    if (!isSelf(u.id)) return true
-    if (u.role === 'admin' && adminCount <= 1) return false
-    return true
-  }
+  const countByRole = (role: UserRole) =>
+    users?.filter((u) => u.role === role).length || 0
 
-  const openConfirm = (u: UserProfile, role: 'admin' | 'staff') => {
+  const isSelf = (id: string) => id === profile?.id
+
+  const openConfirm = (u: UserProfile, role: UserRole) => {
     setConfirmUser(u)
     setConfirmRole(role)
   }
@@ -84,7 +109,7 @@ export default function UsersPage() {
       </div>
 
       {/* 统计 */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -99,24 +124,37 @@ export default function UsersPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              管理员
+              超级管理员
             </CardTitle>
-            <Shield className="h-4 w-4 text-muted-foreground" />
+            <Crown className="h-4 w-4 text-purple-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{adminCount}</div>
+            <div className="text-2xl font-bold text-purple-600">
+              {countByRole('super_admin')}
+            </div>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              员工
+              管理员
             </CardTitle>
-            <User className="h-4 w-4 text-muted-foreground" />
+            <Shield className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{countByRole('admin')}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              库管 / 员工
+            </CardTitle>
+            <UserCog className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {(users?.length || 0) - adminCount}
+              {countByRole('warehouse_manager') + countByRole('staff')}
             </div>
           </CardContent>
         </Card>
@@ -147,77 +185,75 @@ export default function UsersPage() {
                 </TableCell>
               </TableRow>
             ) : (
-              users?.map((u) => (
-                <TableRow key={u.id}>
-                  <TableCell>
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
-                        <span className="text-xs font-medium">
-                          {u.name?.charAt(0) || '?'}
-                        </span>
-                      </div>
-                      <div>
-                        <div className="font-medium text-sm">
-                          {u.name || '未命名'}
-                          {isSelf(u.id) && (
-                            <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                              自己
-                            </span>
-                          )}
+              (users ?? []).map((u) => {
+                const RoleIcon = ROLE_ICONS[u.role]
+                const canChange = canChangeRoleOf(u, profile)
+                return (
+                  <TableRow key={u.id}>
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
+                          <span className="text-xs font-medium">
+                            {u.name?.charAt(0) || '?'}
+                          </span>
                         </div>
-                        <div className="font-mono text-xs text-muted-foreground">
-                          {u.id.slice(0, 8)}...
+                        <div>
+                          <div className="font-medium text-sm">
+                            {u.name || '未命名'}
+                            {isSelf(u.id) && (
+                              <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                                自己
+                              </span>
+                            )}
+                          </div>
+                          <div className="font-mono text-xs text-muted-foreground">
+                            {u.id.slice(0, 8)}...
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    {u.role === 'admin' ? (
-                      <span className="inline-flex items-center gap-1 text-sm font-medium text-primary">
-                        <Shield className="h-3.5 w-3.5" />
-                        管理员
+                    </TableCell>
+                    <TableCell>
+                      <span className={`inline-flex items-center gap-1 text-sm font-medium ${ROLE_COLORS[u.role]}`}>
+                        <RoleIcon className="h-3.5 w-3.5" />
+                        {ROLE_LABELS[u.role]}
                       </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
-                        <User className="h-3.5 w-3.5" />
-                        员工
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {new Date(u.created_at).toLocaleDateString('zh-CN')}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      {u.role !== 'admin' && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openConfirm(u, 'admin')}
-                        >
-                          <Shield className="mr-1 h-3.5 w-3.5" />
-                          设为管理员
-                        </Button>
-                      )}
-                      {u.role !== 'staff' && canDemote(u) && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openConfirm(u, 'staff')}
-                        >
-                          <User className="mr-1 h-3.5 w-3.5" />
-                          设为员工
-                        </Button>
-                      )}
-                      {u.role === 'admin' && !canDemote(u) && (
-                        <span className="text-xs text-muted-foreground">
-                          至少保留一名管理员
-                        </span>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {new Date(u.created_at).toLocaleDateString('zh-CN')}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-2 flex-wrap">
+                        {canChange ? (
+                          ASSIGNABLE_ROLES
+                            .filter((r) => r !== u.role && canAssignRole(r, profile))
+                            .map((r) => {
+                              const Icon = ROLE_ICONS[r]
+                              return (
+                                <Button
+                                  key={r}
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => openConfirm(u, r)}
+                                >
+                                  <Icon className="mr-1 h-3.5 w-3.5" />
+                                  设为{ROLE_LABELS[r]}
+                                </Button>
+                              )
+                            })
+                        ) : u.role === 'super_admin' ? (
+                          <span className="text-xs text-muted-foreground">
+                            超管不可更改
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            —
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )
+              })
             )}
           </TableBody>
         </Table>
@@ -230,7 +266,7 @@ export default function UsersPage() {
             <DialogTitle>确认修改角色</DialogTitle>
             <DialogDescription>
               确定要将 <strong>{confirmUser?.name || '该用户'}</strong> 的角色改为
-              {confirmRole === 'admin' ? '管理员' : '员工'}吗？
+              <strong className="mx-1">{ROLE_LABELS[confirmRole]}</strong>吗？
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

@@ -18,8 +18,10 @@ import { supabase } from '@/lib/supabase'
 import { Card, CardContent } from '@/components/ui/card'
 import { useOutOfStock } from '@/hooks/useOutOfStock'
 import { useLowStockCount } from '@/hooks/useLowStock'
+import { useAuthStore } from '@/store/auth'
 
 export default function MobileHome() {
+  const { canWrite } = useAuthStore()
   const { data: outOfStockItems } = useOutOfStock()
   const outOfStockCount = outOfStockItems?.length || 0
   const lowStockCount = useLowStockCount()
@@ -56,13 +58,14 @@ export default function MobileHome() {
   })
 
   // 功能区：日常高频操作（低明度清新淡雅配色）
-  const quickActions = [
+  const allQuickActions = [
     {
       to: '/m/scan?type=in',
       label: '扫码入库',
       icon: ArrowDownToLine,
       iconClass: 'text-emerald-600',
       bgClass: 'bg-emerald-50',
+      requireWrite: true,
     },
     {
       to: '/m/scan?type=out',
@@ -70,6 +73,7 @@ export default function MobileHome() {
       icon: ArrowUpFromLine,
       iconClass: 'text-amber-600',
       bgClass: 'bg-amber-50',
+      requireWrite: true,
     },
     {
       to: '/m/inventory',
@@ -77,6 +81,7 @@ export default function MobileHome() {
       icon: Search,
       iconClass: 'text-sky-600',
       bgClass: 'bg-sky-50',
+      requireWrite: false,
     },
     {
       to: '/m/scan',
@@ -84,8 +89,11 @@ export default function MobileHome() {
       icon: ScanLine,
       iconClass: 'text-violet-600',
       bgClass: 'bg-violet-50',
+      requireWrite: true,
     },
   ]
+  // 员工（无写入权限）只保留查库存
+  const quickActions = allQuickActions.filter((a) => !a.requireWrite || canWrite())
 
   // 管理入口
   const manageEntries = [
@@ -193,28 +201,32 @@ export default function MobileHome() {
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-3">
-            <div className="flex items-center gap-2 text-muted-foreground text-xs">
-              <TrendingUp className="h-3 w-3 text-emerald-500" />
-              本周入库
-            </div>
-            <div className="text-xl font-bold mt-1 text-emerald-600">
-              +{stats?.weekIn || 0}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3">
-            <div className="flex items-center gap-2 text-muted-foreground text-xs">
-              <TrendingDown className="h-3 w-3 text-amber-500" />
-              本周出库
-            </div>
-            <div className="text-xl font-bold mt-1 text-amber-600">
-              -{stats?.weekOut || 0}
-            </div>
-          </CardContent>
-        </Card>
+        {canWrite() && (
+          <Card>
+            <CardContent className="p-3">
+              <div className="flex items-center gap-2 text-muted-foreground text-xs">
+                <TrendingUp className="h-3 w-3 text-emerald-500" />
+                本周入库
+              </div>
+              <div className="text-xl font-bold mt-1 text-emerald-600">
+                +{stats?.weekIn || 0}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+        {canWrite() && (
+          <Card>
+            <CardContent className="p-3">
+              <div className="flex items-center gap-2 text-muted-foreground text-xs">
+                <TrendingDown className="h-3 w-3 text-amber-500" />
+                本周出库
+              </div>
+              <div className="text-xl font-bold mt-1 text-amber-600">
+                -{stats?.weekOut || 0}
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* 功能区 */}

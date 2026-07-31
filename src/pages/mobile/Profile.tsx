@@ -3,11 +3,11 @@ import { LogOut, User, Shield, Monitor, Package, Warehouse, FolderOpen, Users, C
 import { useAuthStore } from '@/store/auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { ROLE_LABELS } from '@/lib/permissions'
 
 export default function MobileProfile() {
-  const { profile, signOut } = useAuthStore()
+  const { profile, signOut, canManageUsers } = useAuthStore()
   const navigate = useNavigate()
-  const isAdmin = profile?.role === 'admin'
 
   const handleSignOut = async () => {
     await signOut()
@@ -63,14 +63,8 @@ export default function MobileProfile() {
           <div className="flex-1">
             <div className="font-medium">{profile?.name || '未命名'}</div>
             <div className="text-sm text-muted-foreground flex items-center gap-1">
-              {isAdmin ? (
-                <>
-                  <Shield className="h-3 w-3" />
-                  管理员
-                </>
-              ) : (
-                '员工'
-              )}
+              <Shield className="h-3 w-3" />
+              {profile?.role ? ROLE_LABELS[profile.role] : '员工'}
             </div>
           </div>
         </CardContent>
@@ -83,7 +77,7 @@ export default function MobileProfile() {
             <div className="text-sm font-medium">管理功能</div>
           </div>
           {menuItems
-            .filter((item) => !item.adminOnly || isAdmin)
+            .filter((item) => !item.adminOnly || canManageUsers())
             .map((item, idx, arr) => (
               <button
                 key={item.path}

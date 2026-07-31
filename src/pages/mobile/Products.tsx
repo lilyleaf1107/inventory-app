@@ -19,6 +19,7 @@ import {
   deleteProductImage,
 } from '@/lib/supabase'
 import type { Product, Category as CategoryType, Tag as TagType } from '@/types'
+import { useAuthStore } from '@/store/auth'
 import { getLowStockLevel, getLowStockLevelColor } from '@/hooks/useLowStock'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -90,6 +91,7 @@ interface ProductWithTags extends Product {
 export default function MobileProducts() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const { canWrite } = useAuthStore()
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -436,9 +438,11 @@ export default function MobileProducts() {
           <ArrowLeft className="h-5 w-5" />
         </button>
         <h1 className="font-bold text-base flex-1">产品管理</h1>
-        <Button size="sm" onClick={openCreate} className="h-9">
-          <Plus className="h-4 w-4" />
-        </Button>
+        {canWrite() && (
+          <Button size="sm" onClick={openCreate} className="h-9">
+            <Plus className="h-4 w-4" />
+          </Button>
+        )}
       </div>
 
       {/* 搜索和筛选 */}
@@ -476,10 +480,12 @@ export default function MobileProducts() {
               <ImagePlus className="h-8 w-8 text-muted-foreground/50" />
             </div>
             <div className="text-muted-foreground text-sm mb-3">暂无产品</div>
-            <Button size="sm" onClick={openCreate}>
-              <Plus className="h-4 w-4 mr-1" />
-              新增产品
-            </Button>
+            {canWrite() && (
+              <Button size="sm" onClick={openCreate}>
+                <Plus className="h-4 w-4 mr-1" />
+                新增产品
+              </Button>
+            )}
           </div>
         ) : (
           products?.map((p) => {
@@ -528,20 +534,22 @@ export default function MobileProducts() {
                             </span>
                           )}
                         </div>
-                        <div className="flex gap-0.5 flex-shrink-0">
-                          <button
-                            onClick={() => openEdit(p)}
-                            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                          >
-                            <Edit2 className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(p)}
-                            className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
+                        {canWrite() && (
+                          <div className="flex gap-0.5 flex-shrink-0">
+                            <button
+                              onClick={() => openEdit(p)}
+                              className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              <Edit2 className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(p)}
+                              className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        )}
                       </div>
                       <div className="mt-1 flex flex-wrap gap-1 text-xs text-muted-foreground">
                         {p.sku && <span className="font-mono">SKU: {p.sku}</span>}

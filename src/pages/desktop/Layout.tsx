@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useOutOfStock } from '@/hooks/useOutOfStock'
 import { useLowStockCount } from '@/hooks/useLowStock'
+import { ROLE_LABELS } from '@/lib/permissions'
 
 interface NavItem {
   to: string
@@ -29,6 +30,7 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>
   disabled?: boolean
   badge?: number
+  requireWrite?: boolean // 库管及以上才可见
 }
 
 const navItems: NavItem[] = [
@@ -36,12 +38,12 @@ const navItems: NavItem[] = [
   { to: '/products', label: '产品管理', icon: Package },
   { to: '/categories', label: '分类管理', icon: FolderOpen },
   { to: '/warehouses', label: '仓库管理', icon: Warehouse },
-  { to: '/stock-in', label: '入库', icon: ArrowDownToLine },
-  { to: '/stock-out', label: '出库', icon: ArrowUpFromLine },
+  { to: '/stock-in', label: '入库', icon: ArrowDownToLine, requireWrite: true },
+  { to: '/stock-out', label: '出库', icon: ArrowUpFromLine, requireWrite: true },
   { to: '/inventory', label: '库存查询', icon: Search },
   { to: '/out-of-stock', label: '缺货提醒', icon: AlertTriangle },
   { to: '/low-stock', label: '低库存预警', icon: Gauge },
-  { to: '/moves', label: '进出库记录', icon: List },
+  { to: '/moves', label: '进出库记录', icon: List, requireWrite: true },
 ]
 
 const adminItems: NavItem[] = [
@@ -53,7 +55,7 @@ const STORAGE_KEY = 'sidebar-nav-order'
 
 export default function DesktopLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const { profile, signOut, isAdmin } = useAuthStore()
+  const { profile, signOut, canManageUsers, canWrite } = useAuthStore()
   const navigate = useNavigate()
   const { data: outOfStockItems } = useOutOfStock()
   const outOfStockCount = outOfStockItems?.length || 0
@@ -76,6 +78,10 @@ export default function DesktopLayout() {
     }
     return navItems
   })
+  // 根据权限过滤可见项（员工不可见入库/出库/进出库记录）
+  const visibleItems = navItemsOrdered.filter(
+    (item) => !item.requireWrite || canWrite(),
+  )
   const [dragIndex, setDragIndex] = useState<number | null>(null)
 
   const handleDragStart = (index: number) => setDragIndex(index)
@@ -113,7 +119,7 @@ export default function DesktopLayout() {
           <h1 className="font-bold text-lg">进出库管理</h1>
         </div>
         <nav className="flex-1 space-y-1 p-2 overflow-y-auto">
-          {navItemsOrdered.map((item, index) => (
+          {visibleItems.map((item, index) => (
             <NavLink
               key={item.to}
               to={item.disabled ? '#' : item.to}
@@ -148,7 +154,7 @@ export default function DesktopLayout() {
             </NavLink>
           ))}
 
-          {isAdmin() && (
+          {canManageUsers() && (
             <>
               <div className="mt-6 mb-2 px-3 text-xs font-medium text-muted-foreground">
                 管理员
@@ -187,7 +193,7 @@ export default function DesktopLayout() {
                 {profile?.name || '未命名'}
               </p>
               <p className="text-xs text-muted-foreground">
-                {profile?.role === 'admin' ? '管理员' : '员工'}
+                {profile?.role ? ROLE_LABELS[profile.role] : '员工'}
               </p>
             </div>
           </div>
