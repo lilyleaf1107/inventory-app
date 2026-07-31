@@ -103,7 +103,7 @@ export default function LowStockPage() {
                 </TableCell>
               </TableRow>
             ) : (
-              lowStockItems?.map((item) => {
+              (lowStockItems ?? []).map((item) => {
                 const level = getLowStockLevel(item.quantity, item.minStock)
                 const color = getLowStockLevelColor(level)
                 const isMaterial = (item.product as any).is_material_area
