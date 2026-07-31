@@ -58,6 +58,8 @@ export default function LoginPage() {
                 <Label htmlFor="name">姓名</Label>
                 <Input
                   id="name"
+                  name="name"
+                  autoComplete="name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required
@@ -69,6 +71,8 @@ export default function LoginPage() {
               <Label htmlFor="account">手机号 / 邮箱</Label>
               <Input
                 id="account"
+                name="username"
+                autoComplete="username"
                 value={account}
                 onChange={(e) => setAccount(e.target.value)}
                 required
@@ -79,7 +83,9 @@ export default function LoginPage() {
               <Label htmlFor="password">密码</Label>
               <Input
                 id="password"
+                name="password"
                 type="password"
+                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
