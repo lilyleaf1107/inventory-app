@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Search, Edit2, Trash2, ImagePlus, X, Tag } from 'lucide-react'
+import { Plus, Search, Edit2, Trash2, ImagePlus, X, Tag, MapPin } from 'lucide-react'
 import { supabase, getProductImageUrl, uploadProductImage, deleteProductImage } from '@/lib/supabase'
 import type { Product, Category as CategoryType, Tag as TagType } from '@/types'
 import { useAuthStore } from '@/store/auth'
