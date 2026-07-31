@@ -1045,7 +1045,7 @@ where not exists (
 
 -- 5. inventory
 insert into public.inventory (product_id, location_id, quantity, batch_no)
-select p.id, l.id, 1, null
+select p.id, l.id, 50, null
 from (values
   ('入门35000', 'A-01-01-01'),
   ('入门40000', 'A-01-01-01'),
@@ -1619,6 +1619,6 @@ join public.products p on p.name = v.name and p.category = '零件'
 join public.warehouses w on w.code = 'DEFAULT'
 join public.locations l on l.warehouse_id = w.id and l.code = v.loc_code
 on conflict (product_id, location_id) do update
-set quantity = greatest(public.inventory.quantity, 1), updated_at = now();
+set quantity = 50, updated_at = now();
 
 select pg_sleep(1);
