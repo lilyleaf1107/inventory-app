@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, AlertTriangle, Package, MapPin, ImagePlus } from 'lucide-react'
-import { useLowStock, getLowStockLevel, getLowStockLevelColor } from '@/hooks/useLowStock'
+import { useLowStock, getLowStockLevel, getLowStockLevelColor, LOW_STOCK_THRESHOLD_WARNING } from '@/hooks/useLowStock'
 import { Card, CardContent } from '@/components/ui/card'
 import { getProductImageUrl } from '@/lib/supabase'
 
@@ -10,9 +10,9 @@ export default function MobileLowStock() {
 
   const stats = {
     total: lowStockItems?.length || 0,
-    warning: lowStockItems?.filter((i) => getLowStockLevel(i.quantity, i.minStock) === 'warning').length || 0,
-    danger: lowStockItems?.filter((i) => getLowStockLevel(i.quantity, i.minStock) === 'danger').length || 0,
-    critical: lowStockItems?.filter((i) => getLowStockLevel(i.quantity, i.minStock) === 'critical').length || 0,
+    warning: lowStockItems?.filter((i) => getLowStockLevel(i.quantity) === 'warning').length || 0,
+    danger: lowStockItems?.filter((i) => getLowStockLevel(i.quantity) === 'danger').length || 0,
+    critical: lowStockItems?.filter((i) => getLowStockLevel(i.quantity) === 'critical').length || 0,
   }
 
   return (
@@ -39,15 +39,15 @@ export default function MobileLowStock() {
           </CardContent></Card>
           <Card className="border-yellow-200"><CardContent className="p-2 text-center">
             <div className="text-lg font-bold text-yellow-600">{stats.warning}</div>
-            <div className="text-[10px] text-muted-foreground">≤50%</div>
+            <div className="text-[10px] text-muted-foreground">≤50</div>
           </CardContent></Card>
           <Card className="border-orange-200"><CardContent className="p-2 text-center">
             <div className="text-lg font-bold text-orange-600">{stats.danger}</div>
-            <div className="text-[10px] text-muted-foreground">≤30%</div>
+            <div className="text-[10px] text-muted-foreground">≤30</div>
           </CardContent></Card>
           <Card className="border-red-200"><CardContent className="p-2 text-center">
             <div className="text-lg font-bold text-red-600">{stats.critical}</div>
-            <div className="text-[10px] text-muted-foreground">≤10%</div>
+            <div className="text-[10px] text-muted-foreground">≤10</div>
           </CardContent></Card>
         </div>
 
@@ -55,7 +55,7 @@ export default function MobileLowStock() {
         <div className="px-3 pb-3 space-y-2">
           {isLoading ? (
             <div className="text-center py-12 text-muted-foreground text-sm">加载中...</div>
-          ) : lowStockItems?.length === 0 ? (
+          ) : (lowStockItems ?? []).length === 0 ? (
             <div className="text-center py-16">
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-50 mx-auto mb-3">
                 <Package className="h-8 w-8 text-green-500" />
@@ -64,9 +64,10 @@ export default function MobileLowStock() {
             </div>
           ) : (
             (lowStockItems ?? []).map((item) => {
-              const level = getLowStockLevel(item.quantity, item.minStock)
+              const level = getLowStockLevel(item.quantity)
               const color = getLowStockLevelColor(level)
-              const isMaterial = (item.product as any).is_material_area
+              const isMaterial = item.product.is_material_area
+              const ratioPercent = Math.min((item.quantity / LOW_STOCK_THRESHOLD_WARNING) * 100, 100)
               return (
                 <Card key={item.id} className={color.border + ' ' + color.bg}>
                   <CardContent className="p-3 flex items-center gap-3">
@@ -85,7 +86,7 @@ export default function MobileLowStock() {
                       <div className="font-medium text-sm truncate flex items-center gap-1">
                         {item.product.name}
                         {isMaterial && (
-                          <span className="px-1 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700">物料区</span>
+                          <span className="px-1 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700">物料</span>
                         )}
                       </div>
                       <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
@@ -101,11 +102,11 @@ export default function MobileLowStock() {
                               level === 'critical' ? 'bg-red-500' :
                               level === 'danger' ? 'bg-orange-500' : 'bg-yellow-500'
                             }`}
-                            style={{ width: `${Math.min(item.stockRatio * 100, 100)}%` }}
+                            style={{ width: `${ratioPercent}%` }}
                           />
                         </div>
                         <span className="text-[10px] text-muted-foreground">
-                          {isMaterial ? '***' : `${item.quantity}/${item.minStock}${item.product.unit}`}
+                          {isMaterial ? '***' : `${item.quantity}/${LOW_STOCK_THRESHOLD_WARNING}`}
                         </span>
                       </div>
                     </div>

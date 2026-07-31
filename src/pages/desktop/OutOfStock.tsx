@@ -3,6 +3,8 @@ import {
   useOutOfStock,
   formatOutOfStockDuration,
   getStockoutLevel,
+  getStockoutLevelColor,
+  type StockoutLevel,
 } from '@/hooks/useOutOfStock'
 import { supabase, getProductImageUrl } from '@/lib/supabase'
 import {
@@ -11,7 +13,6 @@ import {
   MapPin,
   Clock,
   Package,
-  Warehouse,
   TrendingUp,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -24,41 +25,33 @@ import {
   TableRow,
 } from '@/components/ui/table'
 
-function levelBadge(level: 'recent' | 'warning' | 'critical') {
-  switch (level) {
-    case 'recent':
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">
-          <Clock className="h-3 w-3" />
-          刚断货
-        </span>
-      )
-    case 'warning':
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
-          <AlertTriangle className="h-3 w-3" />
-          缺货中
-        </span>
-      )
-    case 'critical':
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
-          <TrendingUp className="h-3 w-3" />
-          长期缺货
-        </span>
-      )
+function levelBadge(level: StockoutLevel) {
+  const color = getStockoutLevelColor(level)
+  const config = {
+    recent: { icon: Clock, label: '刚断货' },
+    warning: { icon: AlertTriangle, label: '3-7天' },
+    danger: { icon: AlertTriangle, label: '7-30天' },
+    critical: { icon: TrendingUp, label: '超30天' },
   }
+  const { icon: Icon, label } = config[level]
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${color.border} ${color.text} ${color.bg}`}>
+      <Icon className="h-3 w-3" />
+      {label}
+    </span>
+  )
 }
 
 export default function OutOfStockPage() {
   const { data: outOfStockItems, isLoading } = useOutOfStock()
 
   const stats = useMemo(() => {
-    if (!outOfStockItems) return { total: 0, recent: 0, warning: 0, critical: 0 }
+    if (!outOfStockItems) return { total: 0, recent: 0, warning: 0, danger: 0, critical: 0 }
     return {
       total: outOfStockItems.length,
       recent: outOfStockItems.filter((i) => getStockoutLevel(i.lastOutAt) === 'recent').length,
       warning: outOfStockItems.filter((i) => getStockoutLevel(i.lastOutAt) === 'warning').length,
+      danger: outOfStockItems.filter((i) => getStockoutLevel(i.lastOutAt) === 'danger').length,
       critical: outOfStockItems.filter((i) => getStockoutLevel(i.lastOutAt) === 'critical').length,
     }
   }, [outOfStockItems])
@@ -86,7 +79,7 @@ export default function OutOfStockPage() {
       </div>
 
       {/* 统计卡片 */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-5">
         <Card className="border-red-200">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
@@ -101,30 +94,41 @@ export default function OutOfStockPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Clock className="h-4 w-4 text-yellow-500" />
-              24小时内
+              <Clock className="h-4 w-4 text-muted-foreground" />
+              3天内
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-yellow-600">{stats.recent}</div>
+            <div className="text-2xl font-bold text-muted-foreground">{stats.recent}</div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="border-yellow-200">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-yellow-500" />
+              3-7天（黄）
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-yellow-600">{stats.warning}</div>
+          </CardContent>
+        </Card>
+        <Card className="border-orange-200">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 text-orange-500" />
-              1-7天
+              7-30天（橙）
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-orange-600">{stats.warning}</div>
+            <div className="text-2xl font-bold text-orange-600">{stats.danger}</div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="border-red-200">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
               <TrendingUp className="h-4 w-4 text-red-500" />
-              超过7天
+              超30天（红）
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -163,15 +167,9 @@ export default function OutOfStockPage() {
             ) : (
               sortedItems.map((item) => {
                 const level = getStockoutLevel(item.lastOutAt)
-                const rowClass =
-                  level === 'critical'
-                    ? 'bg-red-50/60'
-                    : level === 'warning'
-                      ? 'bg-orange-50/40'
-                      : 'bg-yellow-50/30'
-
+                const color = getStockoutLevelColor(level)
                 return (
-                  <TableRow key={item.id} className={rowClass}>
+                  <TableRow key={item.id} className={color.bg}>
                     <TableCell>
                       {item.product.image_path ? (
                         <img
@@ -213,15 +211,7 @@ export default function OutOfStockPage() {
                         : '未知'}
                     </TableCell>
                     <TableCell>
-                      <span
-                        className={`font-bold text-sm ${
-                          level === 'critical'
-                            ? 'text-red-600'
-                            : level === 'warning'
-                              ? 'text-orange-600'
-                              : 'text-yellow-600'
-                        }`}
-                      >
+                      <span className={`font-bold text-sm ${color.text}`}>
                         {formatOutOfStockDuration(item.lastOutAt)}
                       </span>
                     </TableCell>

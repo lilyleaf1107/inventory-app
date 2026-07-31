@@ -4,6 +4,8 @@ import {
   useOutOfStock,
   formatOutOfStockDuration,
   getStockoutLevel,
+  getStockoutLevelColor,
+  type StockoutLevel,
 } from '@/hooks/useOutOfStock'
 import { getProductImageUrl } from '@/lib/supabase'
 import {
@@ -17,27 +19,19 @@ import {
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 
-function levelBadge(level: 'recent' | 'warning' | 'critical') {
-  switch (level) {
-    case 'recent':
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-yellow-100 text-yellow-700">
-          刚断货
-        </span>
-      )
-    case 'warning':
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-orange-100 text-orange-700">
-          缺货中
-        </span>
-      )
-    case 'critical':
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-100 text-red-700">
-          长期缺货
-        </span>
-      )
+function levelBadge(level: StockoutLevel) {
+  const color = getStockoutLevelColor(level)
+  const labels: Record<StockoutLevel, string> = {
+    recent: '刚断货',
+    warning: '3-7天',
+    danger: '7-30天',
+    critical: '超30天',
   }
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border ${color.border} ${color.text} ${color.bg}`}>
+      {labels[level]}
+    </span>
+  )
 }
 
 export default function MobileOutOfStock() {
@@ -45,11 +39,12 @@ export default function MobileOutOfStock() {
   const { data: outOfStockItems, isLoading } = useOutOfStock()
 
   const stats = useMemo(() => {
-    if (!outOfStockItems) return { total: 0, recent: 0, warning: 0, critical: 0 }
+    if (!outOfStockItems) return { total: 0, recent: 0, warning: 0, danger: 0, critical: 0 }
     return {
       total: outOfStockItems.length,
       recent: outOfStockItems.filter((i) => getStockoutLevel(i.lastOutAt) === 'recent').length,
       warning: outOfStockItems.filter((i) => getStockoutLevel(i.lastOutAt) === 'warning').length,
+      danger: outOfStockItems.filter((i) => getStockoutLevel(i.lastOutAt) === 'danger').length,
       critical: outOfStockItems.filter((i) => getStockoutLevel(i.lastOutAt) === 'critical').length,
     }
   }, [outOfStockItems])
@@ -81,29 +76,35 @@ export default function MobileOutOfStock() {
 
       <div className="flex-1 overflow-y-auto">
         {/* 统计 */}
-        <div className="p-3 grid grid-cols-4 gap-2">
+        <div className="p-3 grid grid-cols-5 gap-1.5">
           <Card className="border-red-200">
-            <CardContent className="p-2.5 text-center">
-              <div className="text-[10px] text-muted-foreground">缺货</div>
-              <div className="text-lg font-bold text-red-600">{stats.total}</div>
+            <CardContent className="p-2 text-center">
+              <div className="text-[9px] text-muted-foreground">总数</div>
+              <div className="text-base font-bold text-red-600">{stats.total}</div>
             </CardContent>
           </Card>
           <Card>
-            <CardContent className="p-2.5 text-center">
-              <div className="text-[10px] text-muted-foreground">24h内</div>
-              <div className="text-lg font-bold text-yellow-600">{stats.recent}</div>
+            <CardContent className="p-2 text-center">
+              <div className="text-[9px] text-muted-foreground">3天内</div>
+              <div className="text-base font-bold text-muted-foreground">{stats.recent}</div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="p-2.5 text-center">
-              <div className="text-[10px] text-muted-foreground">1-7天</div>
-              <div className="text-lg font-bold text-orange-600">{stats.warning}</div>
+          <Card className="border-yellow-200">
+            <CardContent className="p-2 text-center">
+              <div className="text-[9px] text-muted-foreground">3-7天</div>
+              <div className="text-base font-bold text-yellow-600">{stats.warning}</div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="p-2.5 text-center">
-              <div className="text-[10px] text-muted-foreground">超7天</div>
-              <div className="text-lg font-bold text-red-600">{stats.critical}</div>
+          <Card className="border-orange-200">
+            <CardContent className="p-2 text-center">
+              <div className="text-[9px] text-muted-foreground">7-30天</div>
+              <div className="text-base font-bold text-orange-600">{stats.danger}</div>
+            </CardContent>
+          </Card>
+          <Card className="border-red-200">
+            <CardContent className="p-2 text-center">
+              <div className="text-[9px] text-muted-foreground">超30天</div>
+              <div className="text-base font-bold text-red-600">{stats.critical}</div>
             </CardContent>
           </Card>
         </div>
@@ -122,15 +123,9 @@ export default function MobileOutOfStock() {
           ) : (
             sortedItems.map((item) => {
               const level = getStockoutLevel(item.lastOutAt)
-              const cardClass =
-                level === 'critical'
-                  ? 'border-red-300 bg-red-50/40'
-                  : level === 'warning'
-                    ? 'border-orange-200 bg-orange-50/30'
-                    : 'border-yellow-200 bg-yellow-50/20'
-
+              const color = getStockoutLevelColor(level)
               return (
-                <Card key={item.id} className={cardClass}>
+                <Card key={item.id} className={`${color.border} ${color.bg}`}>
                   <CardContent className="p-3">
                     <div className="flex gap-3">
                       {item.product.image_path ? (
@@ -169,15 +164,7 @@ export default function MobileOutOfStock() {
                               ? new Date(item.lastOutAt).toLocaleDateString('zh-CN')
                               : '未知'}
                           </span>
-                          <span
-                            className={`text-xs font-bold ${
-                              level === 'critical'
-                                ? 'text-red-600'
-                                : level === 'warning'
-                                  ? 'text-orange-600'
-                                  : 'text-yellow-600'
-                            }`}
-                          >
+                          <span className={`text-xs font-bold ${color.text}`}>
                             <TrendingUp className="h-3 w-3 inline mr-0.5" />
                             已缺货 {formatOutOfStockDuration(item.lastOutAt)}
                           </span>

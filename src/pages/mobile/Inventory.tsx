@@ -76,7 +76,7 @@ export default function MobileInventory() {
           {inventory?.map((item) => {
             const isOutOfStock = item.quantity === 0
             const isMaterial = item.product.is_material_area
-            const lowStockLevel = getLowStockLevel(item.quantity, item.product.min_stock)
+            const lowStockLevel = getLowStockLevel(item.quantity)
             const lowStockColor = getLowStockLevelColor(lowStockLevel)
             const hasLowStock = lowStockLevel !== 'normal' && !isOutOfStock
             let cardClass = 'bg-background border'

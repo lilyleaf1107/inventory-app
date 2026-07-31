@@ -4,8 +4,6 @@ import { supabase } from '@/lib/supabase'
 export interface LowStockItem {
   id: string
   quantity: number
-  minStock: number
-  stockRatio: number // 当前库存 / min_stock 的比例
   product: {
     id: string
     name: string
@@ -28,16 +26,20 @@ export interface LowStockItem {
 }
 
 // 低库存预警等级
-export type LowStockLevel = 'normal' | 'warning' | 'danger' | 'critical'
+export type LowStockLevel = 'normal' | 'warning' | 'danger' | 'critical' | 'out'
 
-// 根据库存比例返回预警等级
-// >50%: normal, 30-50%: warning(黄色), 10-30%: danger(橙色), <10%: critical(红色)
-export function getLowStockLevel(quantity: number, minStock: number): LowStockLevel {
-  if (minStock <= 0) return 'normal'
-  const ratio = quantity / minStock
-  if (ratio <= 0.1) return 'critical'
-  if (ratio <= 0.3) return 'danger'
-  if (ratio <= 0.5) return 'warning'
+// 固定阈值（取消 min_stock 输入框，改用固定数量阈值）
+// ≤10: critical(红色), ≤30: danger(橙色), ≤50: warning(黄色), =0: out(缺货)
+export const LOW_STOCK_THRESHOLD_WARNING = 50
+export const LOW_STOCK_THRESHOLD_DANGER = 30
+export const LOW_STOCK_THRESHOLD_CRITICAL = 10
+
+// 根据库存数量返回预警等级
+export function getLowStockLevel(quantity: number): LowStockLevel {
+  if (quantity <= 0) return 'out'
+  if (quantity <= LOW_STOCK_THRESHOLD_CRITICAL) return 'critical'
+  if (quantity <= LOW_STOCK_THRESHOLD_DANGER) return 'danger'
+  if (quantity <= LOW_STOCK_THRESHOLD_WARNING) return 'warning'
   return 'normal'
 }
 
@@ -48,6 +50,13 @@ export function getLowStockLevelColor(level: LowStockLevel): {
   label: string
 } {
   switch (level) {
+    case 'out':
+      return {
+        text: 'text-red-800',
+        bg: 'bg-red-100/70',
+        border: 'border-red-300',
+        label: '缺货',
+      }
     case 'critical':
       return {
         text: 'text-red-700',
@@ -79,7 +88,7 @@ export function getLowStockLevelColor(level: LowStockLevel): {
   }
 }
 
-// 获取低库存商品列表（库存 > 0 但低于 min_stock 的 50%）
+// 获取低库存商品列表（库存 > 0 且 ≤ 50）
 export function useLowStock() {
   return useQuery({
     queryKey: ['low-stock'],
@@ -91,7 +100,7 @@ export function useLowStock() {
           quantity,
           product:products (
             id, name, sku, barcode, image_path, unit, category,
-            min_stock, is_material_area
+            is_material_area
           ),
           location:locations (
             id, code,
@@ -99,27 +108,11 @@ export function useLowStock() {
           )
         `)
         .gt('quantity', 0)
-        .order('updated_at', { ascending: true })
+        .lte('quantity', LOW_STOCK_THRESHOLD_WARNING)
+        .order('quantity', { ascending: true })
 
       if (error) throw error
-
-      const items = (data || []) as unknown as LowStockItem[]
-
-      // 过滤出有 min_stock 且库存低于 min_stock 50% 的项
-      return items
-        .filter((item) => {
-          const minStock = (item.product as any).min_stock
-          if (!minStock || minStock <= 0) return false
-          const ratio = item.quantity / minStock
-          return ratio <= 0.5
-        })
-        .map((item) => {
-          const minStock = (item.product as any).min_stock
-          item.minStock = minStock
-          item.stockRatio = item.quantity / minStock
-          return item
-        })
-        .sort((a, b) => a.stockRatio - b.stockRatio)
+      return (data || []) as unknown as LowStockItem[]
     },
   })
 }
@@ -129,8 +122,8 @@ export function useLowStockCount() {
   const { data } = useLowStock()
   return {
     total: data?.length || 0,
-    warning: data?.filter((i) => getLowStockLevel(i.quantity, i.minStock) === 'warning').length || 0,
-    danger: data?.filter((i) => getLowStockLevel(i.quantity, i.minStock) === 'danger').length || 0,
-    critical: data?.filter((i) => getLowStockLevel(i.quantity, i.minStock) === 'critical').length || 0,
+    warning: data?.filter((i) => getLowStockLevel(i.quantity) === 'warning').length || 0,
+    danger: data?.filter((i) => getLowStockLevel(i.quantity) === 'danger').length || 0,
+    critical: data?.filter((i) => getLowStockLevel(i.quantity) === 'critical').length || 0,
   }
 }

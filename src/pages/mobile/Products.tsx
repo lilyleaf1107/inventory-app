@@ -11,6 +11,7 @@ import {
   X,
   ArrowLeft,
   Tag,
+  MapPin,
 } from 'lucide-react'
 import {
   supabase,
@@ -60,7 +61,6 @@ interface ProductForm {
   imagePreview: string | null
   selectedTagIds: string[]
   newTagName: string
-  minStock: number
   isMaterialArea: boolean
 }
 
@@ -76,7 +76,6 @@ const emptyForm: ProductForm = {
   imagePreview: null,
   selectedTagIds: [],
   newTagName: '',
-  minStock: 0,
   isMaterialArea: false,
 }
 
@@ -143,6 +142,35 @@ export default function MobileProducts() {
     staleTime: 30 * 1000,
   })
 
+  // 每个产品的库位明细
+  const { data: productLocationsMap } = useQuery({
+    queryKey: ['products-locations-map'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('inventory')
+        .select(`
+          product_id, quantity,
+          location:locations ( id, code, warehouse:warehouses ( code, name ) )
+        `)
+      if (error) throw error
+      const map = new Map<string, { code: string; warehouseName: string | null; quantity: number }[]>()
+      for (const row of (data || []) as any[]) {
+        const pid = row.product_id as string
+        const loc = row.location
+        if (!loc) continue
+        const list = map.get(pid) || []
+        list.push({
+          code: loc.code,
+          warehouseName: loc.warehouse?.name || loc.warehouse?.code || null,
+          quantity: Number(row.quantity) || 0,
+        })
+        map.set(pid, list)
+      }
+      return map
+    },
+    staleTime: 30 * 1000,
+  })
+
   const { data: products, isLoading } = useQuery({
     queryKey: ['products', search, categoryFilter],
     queryFn: async () => {
@@ -186,7 +214,6 @@ export default function MobileProducts() {
           unit: data.unit,
           image_path: imagePath,
           description: data.description || null,
-          min_stock: data.minStock || 0,
           is_material_area: data.isMaterialArea,
         })
         .select()
@@ -241,7 +268,6 @@ export default function MobileProducts() {
           image_path: imagePath,
           description: data.form.description || null,
           updated_at: new Date().toISOString(),
-          min_stock: data.form.minStock || 0,
           is_material_area: data.form.isMaterialArea,
         })
         .eq('id', data.id)
@@ -326,7 +352,6 @@ export default function MobileProducts() {
       imagePreview: product.image_path ? getProductImageUrl(product.image_path) : null,
       selectedTagIds: [],
       newTagName: '',
-      minStock: product.min_stock || 0,
       isMaterialArea: product.is_material_area || false,
     })
 
@@ -492,13 +517,14 @@ export default function MobileProducts() {
             const productTags = getProductTags(p)
             const totalQty = productQtyMap?.get(p.id) || 0
             const isMaterial = p.is_material_area
-            const isOutOfStock = p.min_stock >= 0 && totalQty === 0
-            const lowStockLevel = getLowStockLevel(totalQty, p.min_stock)
+            const isOutOfStock = totalQty === 0
+            const lowStockLevel = getLowStockLevel(totalQty)
             const lowStockColor = getLowStockLevelColor(lowStockLevel)
             const hasLowStock = lowStockLevel !== 'normal' && !isOutOfStock
+            const locations = productLocationsMap?.get(p.id) || []
             let cardClass = ''
-            if (isOutOfStock && p.min_stock > 0) cardClass = 'bg-red-50/40'
-            else if (hasLowStock) cardClass = lowStockColor.bg
+            if (isOutOfStock) cardClass = 'bg-red-100/60 border-red-200'
+            else if (hasLowStock) cardClass = lowStockColor.bg + ' ' + lowStockColor.border
             return (
               <Card key={p.id} className={cardClass}>
                 <CardContent className="p-3">
@@ -520,10 +546,10 @@ export default function MobileProducts() {
                           {p.name}
                           {isMaterial && (
                             <span className="px-1 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700">
-                              物料区
+                              物料
                             </span>
                           )}
-                          {isOutOfStock && p.min_stock > 0 && (
+                          {isOutOfStock && (
                             <span className="px-1 py-0.5 rounded text-[10px] font-medium bg-red-100 text-red-700">
                               缺货
                             </span>
@@ -551,11 +577,29 @@ export default function MobileProducts() {
                           </div>
                         )}
                       </div>
-                      <div className="mt-1 flex flex-wrap gap-1 text-xs text-muted-foreground">
+                      <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
                         {p.sku && <span className="font-mono">SKU: {p.sku}</span>}
-                        {p.barcode && <span className="font-mono">条码: {p.barcode}</span>}
                         {p.category && <span>分类: {p.category}</span>}
                       </div>
+                      {/* 当前库存 + 库位 */}
+                      <div className="mt-1.5 flex items-center gap-2 text-xs">
+                        <span className="text-muted-foreground">库存:</span>
+                        <span className={`font-semibold ${isOutOfStock ? 'text-red-700' : hasLowStock ? lowStockColor.text : ''}`}>
+                          {isMaterial ? '***' : totalQty}
+                        </span>
+                        {p.unit && <span className="text-muted-foreground">{p.unit}</span>}
+                      </div>
+                      {locations.length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1 text-xs">
+                          {locations.map((loc, idx) => (
+                            <span key={idx} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-muted/60 text-muted-foreground">
+                              <MapPin className="h-2.5 w-2.5" />
+                              <span className="font-mono">{loc.code}</span>
+                              {!isMaterial && <span>: {loc.quantity}</span>}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       {p.spec && (
                         <div className="text-xs text-muted-foreground mt-1">规格: {p.spec}</div>
                       )}
@@ -659,18 +703,7 @@ export default function MobileProducts() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="minStock">最低库存预警值</Label>
-                <Input
-                  id="minStock"
-                  type="number"
-                  min="0"
-                  value={form.minStock}
-                  onChange={(e) => setForm({ ...form, minStock: Number(e.target.value) })}
-                  placeholder="0 表示不预警"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>物料区</Label>
+                <Label>物料</Label>
                 <div className="flex items-center gap-2">
                   <input
                     type="checkbox"
@@ -680,7 +713,7 @@ export default function MobileProducts() {
                     className="h-4 w-4 rounded border-input"
                   />
                   <label htmlFor="isMaterialArea" className="text-sm text-muted-foreground">
-                    物料区商品（不显示具体数量）
+                    标记为物料
                   </label>
                 </div>
               </div>

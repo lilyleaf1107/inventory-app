@@ -101,11 +101,53 @@ export function formatOutOfStockDuration(lastOutAt: string | null): string {
 }
 
 // 缺货时长分级（用于颜色区分）
-export function getStockoutLevel(lastOutAt: string | null): 'recent' | 'warning' | 'critical' {
-  if (!lastOutAt) return 'warning'
+// ≤3天: warning(黄色), ≤7天: danger(橙色), ≤30天或更久: critical(红色)
+export type StockoutLevel = 'recent' | 'warning' | 'danger' | 'critical'
+
+export function getStockoutLevel(lastOutAt: string | null): StockoutLevel {
+  if (!lastOutAt) return 'critical' // 无出库记录视为长期缺货
   const diff = Date.now() - new Date(lastOutAt).getTime()
   const days = diff / (1000 * 60 * 60 * 24)
-  if (days < 1) return 'recent'
-  if (days < 7) return 'warning'
-  return 'critical'
+  if (days < 3) return 'recent'       // 3天内：正常
+  if (days < 7) return 'warning'      // 3-7天：黄色
+  if (days < 30) return 'danger'      // 7-30天：橙色
+  return 'critical'                    // 30天+：红色
+}
+
+export function getStockoutLevelColor(level: StockoutLevel): {
+  text: string
+  bg: string
+  border: string
+  label: string
+} {
+  switch (level) {
+    case 'critical':
+      return {
+        text: 'text-red-800',
+        bg: 'bg-red-100/70',
+        border: 'border-red-300',
+        label: '红色预警',
+      }
+    case 'danger':
+      return {
+        text: 'text-orange-700',
+        bg: 'bg-orange-50/60',
+        border: 'border-orange-200',
+        label: '橙色预警',
+      }
+    case 'warning':
+      return {
+        text: 'text-yellow-700',
+        bg: 'bg-yellow-50/40',
+        border: 'border-yellow-200',
+        label: '黄色预警',
+      }
+    default:
+      return {
+        text: 'text-muted-foreground',
+        bg: 'bg-background',
+        border: 'border',
+        label: '',
+      }
+  }
 }
