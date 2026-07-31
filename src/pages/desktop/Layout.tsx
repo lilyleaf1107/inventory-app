@@ -49,6 +49,8 @@ const adminItems: NavItem[] = [
   { to: '/settings', label: '设置', icon: Settings, disabled: true },
 ]
 
+const STORAGE_KEY = 'sidebar-nav-order'
+
 export default function DesktopLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const { profile, signOut, isAdmin } = useAuthStore()
@@ -56,6 +58,42 @@ export default function DesktopLayout() {
   const { data: outOfStockItems } = useOutOfStock()
   const outOfStockCount = outOfStockItems?.length || 0
   const lowStockCount = useLowStockCount()
+
+  // 侧边栏拖拽排序：从 localStorage 读取自定义顺序
+  const [navItemsOrdered, setNavItemsOrdered] = useState<NavItem[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY)
+      if (saved) {
+        const savedOrder: string[] = JSON.parse(saved)
+        const ordered = savedOrder
+          .map((to) => navItems.find((i) => i.to === to))
+          .filter(Boolean) as NavItem[]
+        const missing = navItems.filter((i) => !savedOrder.includes(i.to))
+        return [...ordered, ...missing]
+      }
+    } catch {
+      // ignore
+    }
+    return navItems
+  })
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
+
+  const handleDragStart = (index: number) => setDragIndex(index)
+  const handleDragOver = (e: React.DragEvent) => e.preventDefault()
+  const handleDrop = (index: number) => {
+    if (dragIndex === null || dragIndex === index) {
+      setDragIndex(null)
+      return
+    }
+    setNavItemsOrdered((prev) => {
+      const next = [...prev]
+      const [dragged] = next.splice(dragIndex, 1)
+      next.splice(index, 0, dragged)
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next.map((i) => i.to)))
+      return next
+    })
+    setDragIndex(null)
+  }
 
   const handleSignOut = async () => {
     await signOut()
@@ -75,14 +113,19 @@ export default function DesktopLayout() {
           <h1 className="font-bold text-lg">进出库管理</h1>
         </div>
         <nav className="flex-1 space-y-1 p-2 overflow-y-auto">
-          {navItems.map((item) => (
+          {navItemsOrdered.map((item, index) => (
             <NavLink
               key={item.to}
               to={item.disabled ? '#' : item.to}
               onClick={(e) => item.disabled && e.preventDefault()}
+              draggable
+              onDragStart={() => handleDragStart(index)}
+              onDragOver={handleDragOver}
+              onDrop={() => handleDrop(index)}
               className={({ isActive }) =>
                 cn(
-                  'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                  'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-grab active:cursor-grabbing',
+                  dragIndex === index && 'opacity-40',
                   isActive && !item.disabled
                     ? 'bg-primary text-primary-foreground'
                     : 'hover:bg-muted',
