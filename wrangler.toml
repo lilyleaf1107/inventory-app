@@ -1,5 +1,5 @@
 name = "inventory-app"
 compatibility_date = "2024-09-23"
 
-[vars]
-SKIP_DEPENDENCY_INSTALL = "true"
+[assets]
+directory = "dist"
