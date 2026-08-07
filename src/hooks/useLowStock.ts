@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { getSettings } from '@/lib/settings'
 
 export interface LowStockItem {
   id: string
@@ -28,18 +29,29 @@ export interface LowStockItem {
 // 低库存预警等级
 export type LowStockLevel = 'normal' | 'warning' | 'danger' | 'critical' | 'out'
 
-// 固定阈值（取消 min_stock 输入框，改用固定数量阈值）
+// 默认阈值（可在设置页面调整）
 // ≤5: critical(红色), ≤15: danger(橙色), ≤30: warning(黄色), =0: out(缺货)
 export const LOW_STOCK_THRESHOLD_WARNING = 30
 export const LOW_STOCK_THRESHOLD_DANGER = 15
 export const LOW_STOCK_THRESHOLD_CRITICAL = 5
 
+// 从 settings 读取当前阈值
+function getThresholds() {
+  const s = getSettings()
+  return {
+    warning: s.lowStockWarning || LOW_STOCK_THRESHOLD_WARNING,
+    danger: s.lowStockDanger || LOW_STOCK_THRESHOLD_DANGER,
+    critical: s.lowStockCritical || LOW_STOCK_THRESHOLD_CRITICAL,
+  }
+}
+
 // 根据库存数量返回预警等级
 export function getLowStockLevel(quantity: number): LowStockLevel {
+  const t = getThresholds()
   if (quantity <= 0) return 'out'
-  if (quantity <= LOW_STOCK_THRESHOLD_CRITICAL) return 'critical'
-  if (quantity <= LOW_STOCK_THRESHOLD_DANGER) return 'danger'
-  if (quantity <= LOW_STOCK_THRESHOLD_WARNING) return 'warning'
+  if (quantity <= t.critical) return 'critical'
+  if (quantity <= t.danger) return 'danger'
+  if (quantity <= t.warning) return 'warning'
   return 'normal'
 }
 
@@ -88,11 +100,12 @@ export function getLowStockLevelColor(level: LowStockLevel): {
   }
 }
 
-// 获取低库存商品列表（库存 > 0 且 ≤ 50）
+// 获取低库存商品列表（库存 > 0 且 ≤ 预警阈值）
 export function useLowStock() {
   return useQuery({
     queryKey: ['low-stock'],
     queryFn: async () => {
+      const t = getThresholds()
       const { data, error } = await supabase
         .from('inventory')
         .select(`
@@ -108,7 +121,7 @@ export function useLowStock() {
           )
         `)
         .gt('quantity', 0)
-        .lte('quantity', LOW_STOCK_THRESHOLD_WARNING)
+        .lte('quantity', t.warning)
         .order('quantity', { ascending: true })
 
       if (error) throw error

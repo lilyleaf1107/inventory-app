@@ -16,6 +16,7 @@ import {
   FolderOpen,
   List,
   Users,
+  Settings,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Card, CardContent } from '@/components/ui/card'
@@ -209,6 +210,16 @@ export default function MobileHome() {
       icon: Users,
       iconClass: 'text-rose-600',
       bgClass: 'bg-rose-50',
+      requireWrite: false,
+      requireAdmin: true,
+    },
+    {
+      to: '/m/settings',
+      label: '设置',
+      desc: '外观、预警、数据维护',
+      icon: Settings,
+      iconClass: 'text-slate-600',
+      bgClass: 'bg-slate-50',
       requireWrite: false,
       requireAdmin: true,
     },

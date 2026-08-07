@@ -50,7 +50,7 @@ const navItems: NavItem[] = [
 
 const adminItems: NavItem[] = [
   { to: '/users', label: '用户管理', icon: Users },
-  { to: '/settings', label: '设置', icon: Settings, disabled: true },
+  { to: '/settings', label: '设置', icon: Settings },
 ]
 
 const STORAGE_KEY = 'sidebar-nav-order'
@@ -164,15 +164,13 @@ export default function DesktopLayout() {
               {adminItems.map((item) => (
                 <NavLink
                   key={item.to}
-                  to={item.disabled ? '#' : item.to}
-                  onClick={(e) => item.disabled && e.preventDefault()}
+                  to={item.to}
                   className={({ isActive }) =>
                     cn(
                       'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                      isActive && !item.disabled
+                      isActive
                         ? 'bg-primary text-primary-foreground'
                         : 'hover:bg-muted',
-                      item.disabled && 'opacity-50 cursor-not-allowed',
                     )
                   }
                 >

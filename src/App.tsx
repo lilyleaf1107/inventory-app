@@ -36,6 +36,8 @@ const MobileLowStock = lazy(() => import('@/pages/mobile/LowStock'))
 const MobileMaterials = lazy(() => import('@/pages/mobile/Materials'))
 const MobileStockIn = lazy(() => import('@/pages/mobile/StockIn'))
 const MobileStockOut = lazy(() => import('@/pages/mobile/StockOut'))
+const MobileSettings = lazy(() => import('@/pages/mobile/Settings'))
+const SettingsPage = lazy(() => import('@/pages/desktop/Settings'))
 
 function ProtectedRoute({ children, name }: { children: React.ReactNode; name?: string }) {
   const { user, loading } = useAuthStore()
@@ -103,6 +105,7 @@ export default function App() {
             <Route path="low-stock" element={<MobileLowStock />} />
             <Route path="stock-in" element={<MobileStockIn />} />
             <Route path="stock-out" element={<MobileStockOut />} />
+            <Route path="settings" element={<MobileSettings />} />
           </Route>
         )}
 
@@ -129,6 +132,7 @@ export default function App() {
           <Route path="users" element={<UsersPage />} />
           <Route path="out-of-stock" element={<OutOfStockPage />} />
           <Route path="low-stock" element={<LowStockPage />} />
+          <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>
     </ErrorBoundary>

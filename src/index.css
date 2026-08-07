@@ -48,6 +48,68 @@
     --ring: 240 4.9% 83.9%;
   }
 
+  /* ========== 五种清新低明度配色 ========== */
+
+  /* 青瓷 — 清雅青绿 */
+  .theme-celadon {
+    --primary: 175 22% 28%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 175 12% 93%;
+    --secondary-foreground: 175 22% 20%;
+    --muted: 175 10% 95%;
+    --muted-foreground: 175 8% 42%;
+    --accent: 175 14% 91%;
+    --accent-foreground: 175 22% 20%;
+    --border: 175 12% 87%;
+    --input: 175 12% 87%;
+    --ring: 175 22% 28%;
+  }
+
+  /* 雾蓝 — 静谧蓝灰 */
+  .theme-mistblue {
+    --primary: 210 24% 30%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 210 14% 93%;
+    --secondary-foreground: 210 24% 22%;
+    --muted: 210 12% 95%;
+    --muted-foreground: 210 10% 42%;
+    --accent: 210 16% 91%;
+    --accent-foreground: 210 24% 22%;
+    --border: 210 14% 87%;
+    --input: 210 14% 87%;
+    --ring: 210 24% 30%;
+  }
+
+  /* 藕荷 — 柔和藕紫 */
+  .theme-lotus {
+    --primary: 275 16% 32%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 275 10% 94%;
+    --secondary-foreground: 275 16% 24%;
+    --muted: 275 8% 96%;
+    --muted-foreground: 275 7% 42%;
+    --accent: 275 12% 92%;
+    --accent-foreground: 275 16% 24%;
+    --border: 275 10% 88%;
+    --input: 275 10% 88%;
+    --ring: 275 16% 32%;
+  }
+
+  /* 暖陶 — 温润陶土 */
+  .theme-warmclay {
+    --primary: 20 28% 33%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 20 16% 94%;
+    --secondary-foreground: 20 28% 25%;
+    --muted: 20 12% 96%;
+    --muted-foreground: 20 10% 42%;
+    --accent: 20 18% 92%;
+    --accent-foreground: 20 28% 25%;
+    --border: 20 16% 88%;
+    --input: 20 16% 88%;
+    --ring: 20 28% 33%;
+  }
+
   * {
     @apply border-border;
   }

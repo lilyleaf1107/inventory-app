@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { supabase } from '@/lib/supabase'
+import { getSettings } from '@/lib/settings'
 import type { UserRole, Profile } from '@/types'
 
 interface AuthState {
@@ -104,9 +105,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     )
   },
 
-  // 管理员及以上可查看/修改产品成本
+  // 可查看/修改产品成本（角色可在设置页面配置）
   canViewCost: () => {
     const role = get().profile?.role
-    return role === 'super_admin' || role === 'admin'
+    if (!role) return false
+    const roles = getSettings().costVisibleRoles
+    return roles.includes(role)
   },
 }))
