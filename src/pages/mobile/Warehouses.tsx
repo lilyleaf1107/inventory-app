@@ -13,6 +13,9 @@ import {
   ChevronDown,
   ChevronUp,
   Building2,
+  Layers,
+  List,
+  Package,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import type { Warehouse, Location } from '@/types'
@@ -80,6 +83,46 @@ function getWhDisplayName(w: Warehouse): string {
   return w.name || w.code
 }
 
+// 库位分组：按 zone → rack 二级分组
+function groupLocations(locs: any[]) {
+  const map = new Map<string, Map<string, any[]>>()
+  for (const l of locs) {
+    const zone = l.zone || '未分区'
+    const rack = l.rack || '未分架'
+    if (!map.has(zone)) map.set(zone, new Map())
+    const rackMap = map.get(zone)!
+    if (!rackMap.has(rack)) rackMap.set(rack, [])
+    rackMap.get(rack)!.push(l)
+  }
+  const sortKey = (a: string, b: string) => {
+    const na = parseInt(a), nb = parseInt(b)
+    if (!isNaN(na) && !isNaN(nb)) return na - nb
+    return a.localeCompare(b)
+  }
+  const sortedZones = Array.from(map.keys()).sort(sortKey)
+  return sortedZones.map((zone) => {
+    const rackMap = map.get(zone)!
+    const sortedRacks = Array.from(rackMap.keys()).sort(sortKey)
+    return {
+      zone,
+      racks: sortedRacks.map((rack) => ({
+        rack,
+        locations: rackMap.get(rack)!,
+      })),
+    }
+  })
+}
+
+// 统计库位占用情况
+function countOccupied(locs: any[]): { total: number; occupied: number } {
+  let occupied = 0
+  for (const l of locs) {
+    const occ = (l.inventory || []).filter((inv: any) => inv.product)
+    if (occ.length > 0) occupied++
+  }
+  return { total: locs.length, occupied }
+}
+
 export default function MobileWarehouses() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -95,6 +138,9 @@ export default function MobileWarehouses() {
   const [editingLoc, setEditingLoc] = useState<Location | null>(null)
   const [locForm, setLocForm] = useState<LocationForm>(emptyLoc)
   const [locSubmitting, setLocSubmitting] = useState(false)
+  const [locViewMode, setLocViewMode] = useState<'grouped' | 'flat'>('grouped')
+  const [collapsedZones, setCollapsedZones] = useState<Set<string>>(new Set())
+  const [collapsedRacks, setCollapsedRacks] = useState<Set<string>>(new Set())
 
   const { data: warehouses, isLoading } = useQuery({
     queryKey: ['warehouses'],
@@ -330,6 +376,38 @@ export default function MobileWarehouses() {
     }
   }
 
+  const toggleZone = (zone: string) => {
+    setCollapsedZones((prev) => {
+      const next = new Set(prev)
+      if (next.has(zone)) next.delete(zone)
+      else next.add(zone)
+      return next
+    })
+  }
+
+  const toggleRack = (zone: string, rack: string) => {
+    const key = `${zone}-${rack}`
+    setCollapsedRacks((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  const expandAllZones = (groups: ReturnType<typeof groupLocations>) => {
+    setCollapsedZones(new Set())
+    setCollapsedRacks(new Set())
+    void groups
+  }
+
+  const collapseAllZones = (groups: ReturnType<typeof groupLocations>) => {
+    const z = new Set<string>()
+    for (const g of groups) z.add(g.zone)
+    setCollapsedZones(z)
+    void groups
+  }
+
   return (
     <div className="flex flex-col h-full">
       {/* 顶部栏 */}
@@ -456,7 +534,7 @@ export default function MobileWarehouses() {
 
         {/* 库位列表 */}
         <div className="p-3 space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2">
               <MapPin className="h-4 w-4 text-primary" />
               <span className="text-sm font-medium">
@@ -466,12 +544,69 @@ export default function MobileWarehouses() {
                 <span className="text-xs text-muted-foreground">共 {locations.length} 个</span>
               )}
             </div>
-            {activeWh && (
-              <Button size="sm" onClick={openCreateLoc} className="h-8">
-                <Plus className="h-3.5 w-3.5 mr-1" />
-                新增
-              </Button>
-            )}
+            <div className="flex items-center gap-2">
+              {activeWh && locations && locations.length > 0 && (
+                <>
+                  <div className="inline-flex rounded-md border overflow-hidden">
+                    <button
+                      type="button"
+                      className={`inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium transition-colors ${
+                        locViewMode === 'grouped'
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-background text-muted-foreground hover:bg-muted'
+                      }`}
+                      onClick={() => setLocViewMode('grouped')}
+                      title="分层视图"
+                    >
+                      <Layers className="h-3 w-3" />
+                      分层
+                    </button>
+                    <button
+                      type="button"
+                      className={`inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium transition-colors ${
+                        locViewMode === 'flat'
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-background text-muted-foreground hover:bg-muted'
+                      }`}
+                      onClick={() => setLocViewMode('flat')}
+                      title="平铺视图"
+                    >
+                      <List className="h-3 w-3" />
+                      平铺
+                    </button>
+                  </div>
+                  {locViewMode === 'grouped' && (() => {
+                    const groups = groupLocations(locations)
+                    return (
+                      <div className="inline-flex rounded-md border overflow-hidden">
+                        <button
+                          type="button"
+                          className="px-2 py-1 text-[11px] bg-background text-muted-foreground hover:bg-muted"
+                          onClick={() => expandAllZones(groups)}
+                          title="全部展开"
+                        >
+                          全展开
+                        </button>
+                        <button
+                          type="button"
+                          className="px-2 py-1 text-[11px] bg-background text-muted-foreground hover:bg-muted border-l"
+                          onClick={() => collapseAllZones(groups)}
+                          title="全部折叠"
+                        >
+                          全折叠
+                        </button>
+                      </div>
+                    )
+                  })()}
+                </>
+              )}
+              {activeWh && (
+                <Button size="sm" onClick={openCreateLoc} className="h-8">
+                  <Plus className="h-3.5 w-3.5 mr-1" />
+                  新增
+                </Button>
+              )}
+            </div>
           </div>
 
           {!activeWh ? (
@@ -489,9 +624,9 @@ export default function MobileWarehouses() {
                 新增库位
               </Button>
             </div>
-          ) : (
+          ) : locViewMode === 'flat' ? (
             <div className="space-y-2">
-              {locations?.map((l) => {
+              {locations?.map((l: any) => {
                 const occupied = (l.inventory || []).filter((inv: any) => inv.product)
                 return (
                 <Card key={l.id}>
@@ -582,6 +717,150 @@ export default function MobileWarehouses() {
                   </CardContent>
                 </Card>
               )})}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {(() => {
+                const groups = groupLocations(locations || [])
+                return groups.map((g) => {
+                  const zoneStats = countOccupied(
+                    g.racks.flatMap((r) => r.locations),
+                  )
+                  const zoneCollapsed = collapsedZones.has(g.zone)
+                  return (
+                    <div key={g.zone} className="rounded-lg border overflow-hidden">
+                      {/* 区域头 */}
+                      <button
+                        type="button"
+                        className="w-full flex items-center gap-2 px-3 py-2 bg-muted/50 hover:bg-muted transition-colors"
+                        onClick={() => toggleZone(g.zone)}
+                      >
+                        <ChevronDown
+                          className={`h-4 w-4 text-muted-foreground transition-transform ${
+                            zoneCollapsed ? '-rotate-90' : ''
+                          }`}
+                        />
+                        <span className="inline-flex items-center justify-center h-7 w-7 rounded-md bg-primary/15 text-primary text-sm font-bold">
+                          {g.zone}
+                        </span>
+                        <span className="font-semibold text-sm">
+                          {g.zone}区
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {zoneStats.total}个 · 占{zoneStats.occupied}
+                        </span>
+                        <span className="ml-auto text-xs text-muted-foreground">
+                          {g.racks.length}架
+                        </span>
+                      </button>
+                      {/* 区域内容 */}
+                      {!zoneCollapsed && (
+                        <div className="p-2 space-y-2">
+                          {g.racks.map((r) => {
+                            const rackStats = countOccupied(r.locations)
+                            const rackCollapsed = collapsedRacks.has(
+                              `${g.zone}-${r.rack}`,
+                            )
+                            return (
+                              <div
+                                key={`${g.zone}-${r.rack}`}
+                                className="rounded-md border border-muted"
+                              >
+                                {/* 货架头 */}
+                                <button
+                                  type="button"
+                                  className="w-full flex items-center gap-2 px-2.5 py-1.5 bg-muted/30 hover:bg-muted/60 transition-colors"
+                                  onClick={() =>
+                                    toggleRack(g.zone, r.rack)
+                                  }
+                                >
+                                  <ChevronDown
+                                    className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${
+                                      rackCollapsed ? '-rotate-90' : ''
+                                    }`}
+                                  />
+                                  <span className="text-sm font-medium">
+                                    货架 {r.rack}
+                                  </span>
+                                  <span className="text-xs text-muted-foreground">
+                                    {rackStats.total}库位 · {rackStats.occupied}占用
+                                  </span>
+                                </button>
+                                {/* 货架内容：库位网格 */}
+                                {!rackCollapsed && (
+                                  <div className="space-y-1.5 p-2">
+                                    {r.locations.map((l: any) => {
+                                      const occupied = (l.inventory || []).filter(
+                                        (inv: any) => inv.product,
+                                      )
+                                      return (
+                                        <div
+                                          key={l.id}
+                                          className={`flex items-center gap-2 p-2 rounded-md border transition-colors ${
+                                            occupied.length > 0
+                                              ? 'border-blue-200 bg-blue-50/30'
+                                              : 'border-border'
+                                          }`}
+                                        >
+                                          <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                            <span className="font-mono text-[11px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded flex-shrink-0">
+                                              {l.level}-{l.position}
+                                            </span>
+                                            {occupied.length > 0 ? (
+                                              <div className="flex flex-wrap gap-1 min-w-0">
+                                                {occupied.map((inv: any) => (
+                                                  <span
+                                                    key={inv.id}
+                                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-blue-100 text-blue-700 truncate max-w-full"
+                                                  >
+                                                    <Package className="h-3 w-3 flex-shrink-0" />
+                                                    <span className="truncate">
+                                                      {inv.product.name}
+                                                    </span>
+                                                    <span className="font-semibold flex-shrink-0">
+                                                      ×{inv.quantity}
+                                                    </span>
+                                                  </span>
+                                                ))}
+                                              </div>
+                                            ) : (
+                                              <span className="text-[11px] text-muted-foreground italic">
+                                                空库位
+                                              </span>
+                                            )}
+                                          </div>
+                                          <div className="flex gap-0.5 flex-shrink-0">
+                                            <button
+                                              onClick={() => openEditLoc(l as Location)}
+                                              className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                                            >
+                                              <Edit2 className="h-3 w-3" />
+                                            </button>
+                                            <button
+                                              onClick={() => {
+                                                if (confirm(`确定删除库位「${l.code}」吗？`)) {
+                                                  deleteLoc.mutate(l.id)
+                                                }
+                                              }}
+                                              className="p-1 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                                            >
+                                              <Trash2 className="h-3 w-3" />
+                                            </button>
+                                          </div>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })
+              })()}
             </div>
           )}
         </div>
