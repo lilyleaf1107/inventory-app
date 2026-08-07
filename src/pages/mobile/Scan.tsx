@@ -393,33 +393,45 @@ export default function MobileScan() {
               </div>
             ) : (
               <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                {(mode === 'out' ? inventoryList : allLocations)?.map((item: any) => (
-                  <button
-                    key={item.location.id}
-                    type="button"
-                    onClick={() => setLocationId(item.location.id)}
-                    className={`w-full flex items-center justify-between p-2.5 rounded-md border text-left transition-colors ${
-                      locationId === item.location.id
-                        ? 'bg-primary/10 ring-1 ring-primary border-primary/30'
-                        : 'hover:bg-muted'
-                    }`}
-                  >
-                    <div>
-                      <div className="font-mono text-sm font-medium">
-                        {item.location.warehouse.code} / {item.location.code}
+                {(mode === 'out' ? inventoryList : allLocations)?.map((row: any) => {
+                  // 入库：allLocations = { id, code, description, warehouse }
+                  // 出库：inventoryList = { quantity, location: { id, code, ..., warehouse } }
+                  const isOut = mode === 'out'
+                  const loc: any = isOut ? row.location : row
+                  const wh: any = loc?.warehouse || {}
+                  const locId: string = loc?.id
+                  const qty = isOut ? row.quantity : null
+                  return (
+                    <button
+                      key={locId}
+                      type="button"
+                      onClick={() => setLocationId(locId)}
+                      className={`w-full flex items-center justify-between p-2.5 rounded-md border text-left transition-colors ${
+                        locationId === locId
+                          ? 'bg-primary/10 ring-1 ring-primary border-primary/30'
+                          : 'hover:bg-muted'
+                      }`}
+                    >
+                      <div>
+                        <div className="font-mono text-sm font-medium">
+                          {wh.code || wh.name || '仓库'} / {loc.code}
+                        </div>
+                        {wh.name && wh.name !== wh.code && (
+                          <div className="text-xs text-muted-foreground">{wh.name}</div>
+                        )}
+                        {loc.description && (
+                          <div className="text-xs text-muted-foreground">{loc.description}</div>
+                        )}
                       </div>
-                      <div className="text-xs text-muted-foreground">
-                        {item.location.warehouse.name || item.location.warehouse.code}
-                      </div>
-                    </div>
-                    {mode === 'out' && (
-                      <div className="text-right">
-                        <div className="font-bold text-sm">{item.quantity}</div>
-                        <div className="text-xs text-muted-foreground">{product.unit}</div>
-                      </div>
-                    )}
-                  </button>
-                ))}
+                      {isOut && (
+                        <div className="text-right">
+                          <div className="font-bold text-sm">{qty}</div>
+                          <div className="text-xs text-muted-foreground">{product.unit}</div>
+                        </div>
+                      )}
+                    </button>
+                  )
+                })}
               </div>
             )}
           </div>
