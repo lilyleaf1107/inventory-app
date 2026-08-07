@@ -90,7 +90,7 @@ interface ProductWithTags extends Product {
 export default function MobileProducts() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const { canWrite } = useAuthStore()
+  const { canWrite, canViewCost } = useAuthStore()
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -606,7 +606,7 @@ export default function MobileProducts() {
                       <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
                         {p.sku && <span className="font-mono">SKU: {p.sku}</span>}
                         {p.category && <span>分类: {p.category}</span>}
-                        {p.cost != null && <span>成本: ¥{Number(p.cost).toFixed(2)}</span>}
+                        {canViewCost() && p.cost != null && <span>成本: ¥{Number(p.cost).toFixed(2)}</span>}
                       </div>
                       <div className="mt-1.5 flex flex-wrap gap-1.5 items-center text-xs">
                         <span className="text-muted-foreground">库存:</span>
@@ -786,17 +786,19 @@ export default function MobileProducts() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="m-cost">成本（元）</Label>
-                <Input
-                  id="m-cost"
-                  type="number"
-                  step="0.01"
-                  value={form.cost}
-                  onChange={(e) => setForm({ ...form, cost: e.target.value })}
-                  placeholder="选填，未填则不显示"
-                />
-              </div>
+              {canViewCost() && (
+                <div className="space-y-2">
+                  <Label htmlFor="m-cost">成本（元）</Label>
+                  <Input
+                    id="m-cost"
+                    type="number"
+                    step="0.01"
+                    value={form.cost}
+                    onChange={(e) => setForm({ ...form, cost: e.target.value })}
+                    placeholder="选填，未填则不显示"
+                  />
+                </div>
+              )}
 
               {/* 标签 */}
               <div className="space-y-2">

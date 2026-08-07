@@ -1,12 +1,12 @@
 import { useNavigate } from 'react-router-dom'
-import { LogOut, User, Shield, Monitor, Package, Warehouse, FolderOpen, Users, ChevronRight, AlertTriangle } from 'lucide-react'
+import { LogOut, User, Shield } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { ROLE_LABELS } from '@/lib/permissions'
 
 export default function MobileProfile() {
-  const { profile, signOut, canManageUsers } = useAuthStore()
+  const { profile, signOut } = useAuthStore()
   const navigate = useNavigate()
 
   const handleSignOut = async () => {
@@ -14,116 +14,28 @@ export default function MobileProfile() {
     navigate('/login')
   }
 
-  const menuItems = [
-    {
-      label: '缺货提醒',
-      desc: '查看库存为零的商品',
-      icon: AlertTriangle,
-      path: '/m/out-of-stock',
-      adminOnly: false,
-    },
-    {
-      label: '产品管理',
-      desc: '新增、编辑、删除产品',
-      icon: Package,
-      path: '/m/products',
-      adminOnly: false,
-    },
-    {
-      label: '仓库管理',
-      desc: '管理仓库和库位',
-      icon: Warehouse,
-      path: '/m/warehouses',
-      adminOnly: false,
-    },
-    {
-      label: '分类管理',
-      desc: '管理产品分类',
-      icon: FolderOpen,
-      path: '/m/categories',
-      adminOnly: true,
-    },
-    {
-      label: '用户管理',
-      desc: '查看和管理团队成员',
-      icon: Users,
-      path: '/m/users',
-      adminOnly: true,
-    },
-  ]
-
   return (
     <div className="p-4 space-y-4">
       {/* 用户信息 */}
       <Card>
-        <CardContent className="p-4 flex items-center gap-3">
-          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
-            <User className="h-7 w-7 text-primary" />
+        <CardContent className="p-5 flex items-center gap-4">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 flex-shrink-0">
+            <User className="h-8 w-8 text-primary" />
           </div>
-          <div className="flex-1">
-            <div className="font-medium">{profile?.name || '未命名'}</div>
-            <div className="text-sm text-muted-foreground flex items-center gap-1">
-              <Shield className="h-3 w-3" />
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold text-lg truncate">{profile?.name || '未命名'}</div>
+            <div className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
+              <Shield className="h-3.5 w-3.5" />
               {profile?.role ? ROLE_LABELS[profile.role] : '员工'}
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* 管理功能 */}
-      <Card>
-        <CardContent className="p-0">
-          <div className="px-4 py-3 border-b">
-            <div className="text-sm font-medium">管理功能</div>
-          </div>
-          {menuItems
-            .filter((item) => !item.adminOnly || canManageUsers())
-            .map((item, idx, arr) => (
-              <button
-                key={item.path}
-                onClick={() => navigate(item.path)}
-                className={`w-full flex items-center gap-3 p-4 hover:bg-muted/50 transition-colors ${
-                  idx !== arr.length - 1 ? 'border-b' : ''
-                }`}
-              >
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
-                  <item.icon className="h-5 w-5 text-primary" />
-                </div>
-                <div className="flex-1 text-left">
-                  <div className="text-sm font-medium flex items-center gap-2">
-                    {item.label}
-                    {item.adminOnly && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
-                        管理员
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-xs text-muted-foreground">{item.desc}</div>
-                </div>
-                <ChevronRight className="h-4 w-4 text-muted-foreground" />
-              </button>
-            ))}
-        </CardContent>
-      </Card>
-
-      {/* 切换到电脑端 */}
-      <Card>
-        <CardContent className="p-0">
-          <button
-            onClick={() => navigate('/products')}
-            className="w-full flex items-center gap-3 p-4 hover:bg-muted/50 transition-colors"
-          >
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
-              <Monitor className="h-5 w-5 text-muted-foreground" />
-            </div>
-            <div className="flex-1 text-left">
-              <div className="text-sm font-medium">切换到电脑端</div>
-              <div className="text-xs text-muted-foreground">大屏完整功能体验</div>
-            </div>
-            <ChevronRight className="h-4 w-4 text-muted-foreground" />
-          </button>
-        </CardContent>
-      </Card>
+      {/* 提示 */}
+      <div className="text-center text-xs text-muted-foreground py-2">
+        所有功能入口请在「首页」查看
+      </div>
 
       {/* 退出登录 */}
       <Button

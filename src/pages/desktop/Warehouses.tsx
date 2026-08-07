@@ -113,6 +113,25 @@ function countOccupied(locs: any[]): { total: number; occupied: number } {
   return { total: locs.length, occupied }
 }
 
+// 库位按 level 分组（货架 → 层级）
+function groupByLevel(locs: any[]) {
+  const map = new Map<string, any[]>()
+  for (const l of locs) {
+    const lv = l.level || '未分层'
+    if (!map.has(lv)) map.set(lv, [])
+    map.get(lv)!.push(l)
+  }
+  const sortKey = (a: string, b: string) => {
+    const na = parseInt(a), nb = parseInt(b)
+    if (!isNaN(na) && !isNaN(nb)) return na - nb
+    return a.localeCompare(b)
+  }
+  return Array.from(map.keys()).sort(sortKey).map((level) => ({
+    level,
+    locations: map.get(level)!,
+  }))
+}
+
 export default function WarehousesPage() {
   const queryClient = useQueryClient()
 
@@ -130,6 +149,7 @@ export default function WarehousesPage() {
   const [locViewMode, setLocViewMode] = useState<'grouped' | 'flat'>('grouped')
   const [collapsedZones, setCollapsedZones] = useState<Set<string>>(new Set())
   const [collapsedRacks, setCollapsedRacks] = useState<Set<string>>(new Set())
+  const [collapsedLevels, setCollapsedLevels] = useState<Set<string>>(new Set())
 
   const { data: warehouses, isLoading } = useQuery({
     queryKey: ['warehouses'],
@@ -387,9 +407,20 @@ export default function WarehousesPage() {
     })
   }
 
+  const toggleLevel = (zone: string, rack: string, level: string) => {
+    const key = `${zone}-${rack}-${level}`
+    setCollapsedLevels((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
   const expandAllZones = (groups: ReturnType<typeof groupLocations>) => {
     setCollapsedZones(new Set())
     setCollapsedRacks(new Set())
+    setCollapsedLevels(new Set())
     void groups
   }
 
@@ -397,6 +428,8 @@ export default function WarehousesPage() {
     const z = new Set<string>()
     for (const g of groups) z.add(g.zone)
     setCollapsedZones(z)
+    setCollapsedRacks(new Set())
+    setCollapsedLevels(new Set())
     void groups
   }
 
@@ -799,86 +832,123 @@ export default function WarehousesPage() {
                                           {rackStats.total} 库位 · {rackStats.occupied} 占用
                                         </span>
                                       </button>
-                                      {/* 货架内容：库位网格 */}
+                                      {/* 货架内容：先按 level 分组 */}
                                       {!rackCollapsed && (
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 p-2">
-                                          {r.locations.map((l: any) => {
-                                            const occupied = (l.inventory || []).filter(
-                                              (inv: any) => inv.product,
-                                            )
+                                        <div className="space-y-1.5 p-2">
+                                          {groupByLevel(r.locations).map((lvGroup) => {
+                                            const lvStats = countOccupied(lvGroup.locations)
+                                            const lvKey = `${g.zone}-${r.rack}-${lvGroup.level}`
+                                            const lvCollapsed = collapsedLevels.has(lvKey)
                                             return (
                                               <div
-                                                key={l.id}
-                                                className={`flex items-center gap-2 p-2 rounded-md border transition-colors ${
-                                                  occupied.length > 0
-                                                    ? 'border-blue-200 bg-blue-50/30 hover:border-blue-300'
-                                                    : 'border-border hover:border-primary/40 hover:bg-muted/20'
-                                                }`}
+                                                key={lvKey}
+                                                className="rounded-sm border border-border/70 overflow-hidden"
                                               >
-                                                <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                                                  <span className="font-mono text-[11px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded flex-shrink-0">
-                                                    {l.level}-{l.position}
+                                                <button
+                                                  type="button"
+                                                  className="w-full flex items-center gap-2 px-2 py-1 bg-primary/5 hover:bg-primary/10 transition-colors"
+                                                  onClick={() =>
+                                                    toggleLevel(g.zone, r.rack, lvGroup.level)
+                                                  }
+                                                >
+                                                  <ChevronDown
+                                                    className={`h-3 w-3 text-muted-foreground transition-transform ${
+                                                      lvCollapsed ? '-rotate-90' : ''
+                                                    }`}
+                                                  />
+                                                  <span className="text-xs font-semibold text-primary/90">
+                                                    {lvGroup.level === '未分层'
+                                                      ? lvGroup.level
+                                                      : `${lvGroup.level} 层`}
                                                   </span>
-                                                  {occupied.length > 0 ? (
-                                                    <div className="flex flex-wrap gap-1 min-w-0">
-                                                      {occupied.map((inv: any) => (
-                                                        <span
-                                                          key={inv.id}
-                                                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-blue-100 text-blue-700 truncate max-w-full"
-                                                          title={
-                                                            inv.product.name +
-                                                            (inv.product.sku
-                                                              ? ' · ' + inv.product.sku
-                                                              : '')
-                                                          }
+                                                  <span className="text-[11px] text-muted-foreground">
+                                                    {lvStats.total} 库位 · {lvStats.occupied} 占用
+                                                  </span>
+                                                </button>
+                                                {!lvCollapsed && (
+                                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 p-1.5">
+                                                    {lvGroup.locations.map((l: any) => {
+                                                      const occupied = (l.inventory || []).filter(
+                                                        (inv: any) => inv.product,
+                                                      )
+                                                      return (
+                                                        <div
+                                                          key={l.id}
+                                                          className={`flex items-center gap-2 p-2 rounded-md border transition-colors ${
+                                                            occupied.length > 0
+                                                              ? 'border-blue-200 bg-blue-50/30 hover:border-blue-300'
+                                                              : 'border-border hover:border-primary/40 hover:bg-muted/20'
+                                                          }`}
                                                         >
-                                                          <Package className="h-3 w-3 flex-shrink-0" />
-                                                          <span className="truncate">
-                                                            {inv.product.name}
+                                                          <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                                            <span className="font-mono text-[11px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded flex-shrink-0">
+                                                              {l.level}-{l.position}
+                                                            </span>
+                                                            {occupied.length > 0 ? (
+                                                              <div className="flex flex-wrap gap-1 min-w-0">
+                                                                {occupied.map((inv: any) => (
+                                                                  <span
+                                                                    key={inv.id}
+                                                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-blue-100 text-blue-700 truncate max-w-full"
+                                                                    title={
+                                                                      inv.product.name +
+                                                                      (inv.product.sku
+                                                                        ? ' · ' + inv.product.sku
+                                                                        : '')
+                                                                    }
+                                                                  >
+                                                                    <Package className="h-3 w-3 flex-shrink-0" />
+                                                                    <span className="truncate">
+                                                                      {inv.product.name}
+                                                                    </span>
+                                                                    <span className="font-semibold flex-shrink-0">
+                                                                      ×{inv.quantity}
+                                                                    </span>
+                                                                  </span>
+                                                                ))}
+                                                              </div>
+                                                            ) : (
+                                                              <span className="text-[11px] text-muted-foreground italic">
+                                                                空库位
+                                                              </span>
+                                                            )}
+                                                          </div>
+                                                          <span className="font-mono text-[10px] text-muted-foreground/70 flex-shrink-0 hidden lg:inline">
+                                                            {l.code}
                                                           </span>
-                                                          <span className="font-semibold flex-shrink-0">
-                                                            ×{inv.quantity}
-                                                          </span>
-                                                        </span>
-                                                      ))}
-                                                    </div>
-                                                  ) : (
-                                                    <span className="text-[11px] text-muted-foreground italic">
-                                                      空库位
-                                                    </span>
-                                                  )}
-                                                </div>
-                                                <span className="font-mono text-[10px] text-muted-foreground/70 flex-shrink-0 hidden lg:inline">
-                                                  {l.code}
-                                                </span>
-                                                <div className="flex gap-0.5 flex-shrink-0">
-                                                  <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-6 w-6"
-                                                    onClick={() =>
-                                                      openEditLoc(l as Location)
-                                                    }
-                                                  >
-                                                    <Edit2 className="h-3 w-3" />
-                                                  </Button>
-                                                  <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-6 w-6 text-destructive"
-                                                    onClick={() => {
-                                                      if (
-                                                        confirm(
-                                                          `确定删除库位「${l.code}」吗？`,
-                                                        )
-                                                      ) {
-                                                        deleteLoc.mutate(l.id)
-                                                      }
-                                                    }}
-                                                  >
-                                                    <Trash2 className="h-3 w-3" />
-                                                  </Button>
-                                                </div>
+                                                          <div className="flex gap-0.5 flex-shrink-0">
+                                                            <Button
+                                                              variant="ghost"
+                                                              size="icon"
+                                                              className="h-6 w-6"
+                                                              onClick={() =>
+                                                                openEditLoc(l as Location)
+                                                              }
+                                                            >
+                                                              <Edit2 className="h-3 w-3" />
+                                                            </Button>
+                                                            <Button
+                                                              variant="ghost"
+                                                              size="icon"
+                                                              className="h-6 w-6 text-destructive"
+                                                              onClick={() => {
+                                                                if (
+                                                                  confirm(
+                                                                    `确定删除库位「${l.code}」吗？`,
+                                                                  )
+                                                                ) {
+                                                                  deleteLoc.mutate(l.id)
+                                                                }
+                                                              }}
+                                                            >
+                                                              <Trash2 className="h-3 w-3" />
+                                                            </Button>
+                                                          </div>
+                                                        </div>
+                                                      )
+                                                    })}
+                                                  </div>
+                                                )}
                                               </div>
                                             )
                                           })}

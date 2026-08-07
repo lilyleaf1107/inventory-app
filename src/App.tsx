@@ -2,6 +2,8 @@ import { useEffect, useState, lazy, Suspense } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
 import { useDevice } from '@/hooks/useDevice'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { Loading } from '@/components/Loading'
 import LoginPage from '@/pages/auth/Login'
 
 // 懒加载所有页面组件，减小初始包体积
@@ -32,16 +34,10 @@ const MobileUsers = lazy(() => import('@/pages/mobile/Users'))
 const MobileOutOfStock = lazy(() => import('@/pages/mobile/OutOfStock'))
 const MobileLowStock = lazy(() => import('@/pages/mobile/LowStock'))
 const MobileMaterials = lazy(() => import('@/pages/mobile/Materials'))
+const MobileStockIn = lazy(() => import('@/pages/mobile/StockIn'))
+const MobileStockOut = lazy(() => import('@/pages/mobile/StockOut'))
 
-function Loading() {
-  return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-    </div>
-  )
-}
-
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
+function ProtectedRoute({ children, name }: { children: React.ReactNode; name?: string }) {
   const { user, loading } = useAuthStore()
   const location = useLocation()
 
@@ -51,7 +47,11 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return <Navigate to="/login" state={{ from: location }} replace />
   }
 
-  return <Suspense fallback={<Loading />}>{children}</Suspense>
+  return (
+    <ErrorBoundary name={name}>
+      <Suspense fallback={<Loading />}>{children}</Suspense>
+    </ErrorBoundary>
+  )
 }
 
 export default function App() {
@@ -64,62 +64,73 @@ export default function App() {
   }, [checkAuth])
 
   if (!init && loading) {
-    return <Loading />
+    return <Loading text="正在初始化..." />
   }
 
   return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-
-      {/* 移动端路由 */}
-      {isMobile && (
+    <ErrorBoundary name="应用">
+      <Routes>
         <Route
-          path="/m/*"
+          path="/login"
           element={
-            <ProtectedRoute>
-              <MobileLayout />
+            <ErrorBoundary name="登录">
+              <LoginPage />
+            </ErrorBoundary>
+          }
+        />
+
+        {/* 移动端路由 */}
+        {isMobile && (
+          <Route
+            path="/m/*"
+            element={
+              <ProtectedRoute name="移动端">
+                <MobileLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<MobileHome />} />
+            <Route path="scan" element={<MobileScan />} />
+            <Route path="inventory" element={<MobileInventory />} />
+            <Route path="moves" element={<MobileMoves />} />
+            <Route path="profile" element={<MobileProfile />} />
+            <Route path="products" element={<MobileProducts />} />
+            <Route path="materials" element={<MobileMaterials />} />
+            <Route path="warehouses" element={<MobileWarehouses />} />
+            <Route path="categories" element={<MobileCategories />} />
+            <Route path="users" element={<MobileUsers />} />
+            <Route path="out-of-stock" element={<MobileOutOfStock />} />
+            <Route path="low-stock" element={<MobileLowStock />} />
+            <Route path="stock-in" element={<MobileStockIn />} />
+            <Route path="stock-out" element={<MobileStockOut />} />
+          </Route>
+        )}
+
+        {/* 桌面端路由（默认） */}
+        <Route
+          path="/*"
+          element={
+            <ProtectedRoute name="桌面端">
+              <DesktopLayout />
             </ProtectedRoute>
           }
         >
-          <Route index element={<MobileHome />} />
-          <Route path="scan" element={<MobileScan />} />
-          <Route path="inventory" element={<MobileInventory />} />
-          <Route path="moves" element={<MobileMoves />} />
-          <Route path="profile" element={<MobileProfile />} />
-          <Route path="products" element={<MobileProducts />} />
-          <Route path="materials" element={<MobileMaterials />} />
-          <Route path="warehouses" element={<MobileWarehouses />} />
-          <Route path="categories" element={<MobileCategories />} />
-          <Route path="users" element={<MobileUsers />} />
-          <Route path="out-of-stock" element={<MobileOutOfStock />} />
-          <Route path="low-stock" element={<MobileLowStock />} />
+          <Route index element={<Navigate to={isMobile ? '/m' : '/dashboard'} replace />} />
+          <Route path="dashboard" element={<DashboardPage />} />
+          <Route path="m" element={<Navigate to="/m" replace />} />
+          <Route path="products" element={<ProductsPage />} />
+          <Route path="materials" element={<MaterialsPage />} />
+          <Route path="categories" element={<CategoriesPage />} />
+          <Route path="warehouses" element={<WarehousesPage />} />
+          <Route path="stock-in" element={<StockInPage />} />
+          <Route path="stock-out" element={<StockOutPage />} />
+          <Route path="inventory" element={<InventoryPage />} />
+          <Route path="moves" element={<StockMovesPage />} />
+          <Route path="users" element={<UsersPage />} />
+          <Route path="out-of-stock" element={<OutOfStockPage />} />
+          <Route path="low-stock" element={<LowStockPage />} />
         </Route>
-      )}
-
-      {/* 桌面端路由（默认） */}
-      <Route
-        path="/*"
-        element={
-          <ProtectedRoute>
-            <DesktopLayout />
-          </ProtectedRoute>
-        }
-      >
-        <Route index element={<Navigate to={isMobile ? '/m' : '/dashboard'} replace />} />
-        <Route path="dashboard" element={<DashboardPage />} />
-        <Route path="m" element={<Navigate to="/m" replace />} />
-        <Route path="products" element={<ProductsPage />} />
-        <Route path="materials" element={<MaterialsPage />} />
-        <Route path="categories" element={<CategoriesPage />} />
-        <Route path="warehouses" element={<WarehousesPage />} />
-        <Route path="stock-in" element={<StockInPage />} />
-        <Route path="stock-out" element={<StockOutPage />} />
-        <Route path="inventory" element={<InventoryPage />} />
-        <Route path="moves" element={<StockMovesPage />} />
-        <Route path="users" element={<UsersPage />} />
-        <Route path="out-of-stock" element={<OutOfStockPage />} />
-        <Route path="low-stock" element={<LowStockPage />} />
-      </Route>
-    </Routes>
+      </Routes>
+    </ErrorBoundary>
   )
 }

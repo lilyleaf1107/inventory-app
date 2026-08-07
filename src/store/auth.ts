@@ -17,6 +17,7 @@ interface AuthState {
   canWrite: () => boolean
   canManageUsers: () => boolean
   canViewMoves: () => boolean
+  canViewCost: () => boolean
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -101,5 +102,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       role === 'admin' ||
       role === 'warehouse_manager'
     )
+  },
+
+  // 管理员及以上可查看/修改产品成本
+  canViewCost: () => {
+    const role = get().profile?.role
+    return role === 'super_admin' || role === 'admin'
   },
 }))

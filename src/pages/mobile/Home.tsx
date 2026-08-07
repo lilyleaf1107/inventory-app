@@ -13,6 +13,9 @@ import {
   Warehouse,
   Gauge,
   Boxes,
+  FolderOpen,
+  List,
+  Users,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Card, CardContent } from '@/components/ui/card'
@@ -21,7 +24,7 @@ import { useLowStockCount } from '@/hooks/useLowStock'
 import { useAuthStore } from '@/store/auth'
 
 export default function MobileHome() {
-  const { canWrite } = useAuthStore()
+  const { canWrite, canManageUsers } = useAuthStore()
   const { data: outOfStockItems } = useOutOfStock()
   const outOfStockCount = outOfStockItems?.length || 0
   const lowStockCount = useLowStockCount()
@@ -95,8 +98,8 @@ export default function MobileHome() {
   // 员工（无写入权限）只保留查库存
   const quickActions = allQuickActions.filter((a) => !a.requireWrite || canWrite())
 
-  // 管理入口
-  const manageEntries = [
+  // 管理入口（对应桌面端侧边栏全部功能）
+  const allManageEntries = [
     {
       to: '/m/products',
       label: '产品管理',
@@ -104,6 +107,8 @@ export default function MobileHome() {
       icon: Package,
       iconClass: 'text-sky-600',
       bgClass: 'bg-sky-50',
+      requireWrite: false,
+      requireAdmin: false,
     },
     {
       to: '/m/materials',
@@ -112,6 +117,18 @@ export default function MobileHome() {
       icon: Boxes,
       iconClass: 'text-teal-600',
       bgClass: 'bg-teal-50',
+      requireWrite: false,
+      requireAdmin: false,
+    },
+    {
+      to: '/m/categories',
+      label: '分类管理',
+      desc: '维护产品分类',
+      icon: FolderOpen,
+      iconClass: 'text-purple-600',
+      bgClass: 'bg-purple-50',
+      requireWrite: false,
+      requireAdmin: false,
     },
     {
       to: '/m/warehouses',
@@ -120,6 +137,38 @@ export default function MobileHome() {
       icon: Warehouse,
       iconClass: 'text-indigo-600',
       bgClass: 'bg-indigo-50',
+      requireWrite: false,
+      requireAdmin: false,
+    },
+    {
+      to: '/m/stock-in',
+      label: '入库',
+      desc: '扫码/手动入库操作',
+      icon: ArrowDownToLine,
+      iconClass: 'text-emerald-600',
+      bgClass: 'bg-emerald-50',
+      requireWrite: true,
+      requireAdmin: false,
+    },
+    {
+      to: '/m/stock-out',
+      label: '出库',
+      desc: '扫码/手动出库操作',
+      icon: ArrowUpFromLine,
+      iconClass: 'text-amber-600',
+      bgClass: 'bg-amber-50',
+      requireWrite: true,
+      requireAdmin: false,
+    },
+    {
+      to: '/m/inventory',
+      label: '库存查询',
+      desc: '搜索库存及分布',
+      icon: Search,
+      iconClass: 'text-sky-600',
+      bgClass: 'bg-sky-50',
+      requireWrite: false,
+      requireAdmin: false,
     },
     {
       to: '/m/out-of-stock',
@@ -129,6 +178,8 @@ export default function MobileHome() {
       iconClass: outOfStockCount > 0 ? 'text-red-600' : 'text-slate-500',
       bgClass: outOfStockCount > 0 ? 'bg-red-50' : 'bg-slate-50',
       badge: outOfStockCount > 0 ? outOfStockCount : undefined,
+      requireWrite: false,
+      requireAdmin: false,
     },
     {
       to: '/m/low-stock',
@@ -138,8 +189,36 @@ export default function MobileHome() {
       iconClass: lowStockCount.total > 0 ? 'text-orange-600' : 'text-slate-500',
       bgClass: lowStockCount.total > 0 ? 'bg-orange-50' : 'bg-slate-50',
       badge: lowStockCount.total > 0 ? lowStockCount.total : undefined,
+      requireWrite: false,
+      requireAdmin: false,
+    },
+    {
+      to: '/m/moves',
+      label: '进出库记录',
+      desc: '最近出入库流水',
+      icon: List,
+      iconClass: 'text-slate-600',
+      bgClass: 'bg-slate-50',
+      requireWrite: true,
+      requireAdmin: false,
+    },
+    {
+      to: '/m/users',
+      label: '用户管理',
+      desc: '团队成员与权限',
+      icon: Users,
+      iconClass: 'text-rose-600',
+      bgClass: 'bg-rose-50',
+      requireWrite: false,
+      requireAdmin: true,
     },
   ]
+  // 过滤权限
+  const manageEntries = allManageEntries.filter((e) => {
+    if (e.requireWrite && !canWrite()) return false
+    if (e.requireAdmin && !canManageUsers()) return false
+    return true
+  })
 
   return (
     <div className="p-4 space-y-4">

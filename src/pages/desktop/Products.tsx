@@ -80,7 +80,7 @@ interface ProductWithTags extends Product {
 
 export default function ProductsPage() {
   const queryClient = useQueryClient()
-  const { canWrite } = useAuthStore()
+  const { canWrite, canViewCost } = useAuthStore()
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
   const [selectedTagFilter, setSelectedTagFilter] = useState<string[]>([])
@@ -556,7 +556,7 @@ export default function ProductsPage() {
               <TableHead>分类</TableHead>
               <TableHead>标签</TableHead>
               <TableHead>规格</TableHead>
-              <TableHead>成本</TableHead>
+              {canViewCost() && <TableHead>成本</TableHead>}
               <TableHead>当前库存</TableHead>
               <TableHead>库位</TableHead>
               <TableHead>上架状态</TableHead>
@@ -566,13 +566,13 @@ export default function ProductsPage() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={12} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={canViewCost() ? 12 : 11} className="text-center text-muted-foreground py-8">
                   加载中...
                 </TableCell>
               </TableRow>
             ) : products?.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={12} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={canViewCost() ? 12 : 11} className="text-center text-muted-foreground py-8">
                   暂无产品，点击右上角新增
                 </TableCell>
               </TableRow>
@@ -643,13 +643,15 @@ export default function ProductsPage() {
                       </div>
                     </TableCell>
                     <TableCell>{p.spec || '-'}</TableCell>
-                    <TableCell>
-                      {p.cost == null ? (
-                        <span className="text-muted-foreground">-</span>
-                      ) : (
-                        <span className="font-mono">¥{Number(p.cost).toFixed(2)}</span>
-                      )}
-                    </TableCell>
+                    {canViewCost() && (
+                      <TableCell>
+                        {p.cost == null ? (
+                          <span className="text-muted-foreground">-</span>
+                        ) : (
+                          <span className="font-mono">¥{Number(p.cost).toFixed(2)}</span>
+                        )}
+                      </TableCell>
+                    )}
                     <TableCell>
                       <span className={`font-semibold ${isOutOfStock ? 'text-red-700' : hasLowStock ? lowStockColor.text : ''}`}>
                         {totalQty}
@@ -790,17 +792,19 @@ export default function ProductsPage() {
                   onChange={(e) => setForm({ ...form, unit: e.target.value })}
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="cost">成本（元）</Label>
-                <Input
-                  id="cost"
-                  type="number"
-                  step="0.01"
-                  value={form.cost}
-                  onChange={(e) => setForm({ ...form, cost: e.target.value })}
-                  placeholder="选填，未填则不显示"
-                />
-              </div>
+              {canViewCost() && (
+                <div className="space-y-2">
+                  <Label htmlFor="cost">成本（元）</Label>
+                  <Input
+                    id="cost"
+                    type="number"
+                    step="0.01"
+                    value={form.cost}
+                    onChange={(e) => setForm({ ...form, cost: e.target.value })}
+                    placeholder="选填，未填则不显示"
+                  />
+                </div>
+              )}
               <div className="md:col-span-2 space-y-2">
                 <Label>产品标签</Label>
                 <div className="flex flex-wrap gap-2 mb-2">
