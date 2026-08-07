@@ -159,6 +159,50 @@ export default function StockInPage() {
     findProductByBarcode(code)
   }
 
+  // 产品变化时：查询该产品最近一次 inventory 记录，保存目标库位到状态
+  const [pendingLocationId, setPendingLocationId] = useState<string>('')
+
+  useEffect(() => {
+    let cancelled = false
+    if (!product) {
+      setPendingLocationId('')
+      return
+    }
+    ;(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('inventory')
+          .select(`location_id, locations ( warehouse_id )`)
+          .eq('product_id', product.id)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        if (error) throw error
+        if (!data || cancelled) return
+        const loc: any = (data as any)?.locations
+        const targetLocId = (data as any)?.location_id as string | undefined
+        if (loc?.warehouse_id) {
+          setWarehouseId(loc.warehouse_id)
+        }
+        setPendingLocationId(targetLocId || '')
+      } catch {
+        // 忽略预设失败
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [product?.id])
+
+  // 仓库变化、locations 拉取完成后，选中保存的库位（只在匹配的仓库里）
+  useEffect(() => {
+    if (!pendingLocationId || !locations) return
+    if (locations.some((l) => l.id === pendingLocationId)) {
+      setLocationId(pendingLocationId)
+      setPendingLocationId('')
+    }
+  }, [pendingLocationId, locations])
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">

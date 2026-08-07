@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Edit2, Trash2, MapPin, Pin, PinOff, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Plus, Edit2, Trash2, MapPin, Pin, PinOff, ChevronLeft, ChevronRight, Package } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import type { Warehouse, Location } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -114,11 +114,23 @@ export default function WarehousesPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('locations')
-        .select('*')
+        .select(`
+          *,
+          inventory (
+            id, quantity,
+            product:products ( id, name, sku, barcode )
+          )
+        `)
         .eq('warehouse_id', activeWh!.id)
         .order('code')
       if (error) throw error
-      return data as Location[]
+      return data as (Location & {
+          inventory?: {
+            id: string
+            quantity: number
+            product: { id: string; name: string; sku: string | null; barcode: string | null } | null
+          }[]
+        })[]
     },
   })
 
@@ -495,13 +507,15 @@ export default function WarehousesPage() {
               </div>
             ) : (
               <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
-                {locations?.map((l) => (
+                {locations?.map((l: any) => {
+                  const occupied = (l.inventory || []).filter((inv: any) => inv.product)
+                  return (
                   <div
                     key={l.id}
                     className="flex items-center justify-between p-3 rounded-md border hover:border-primary/40 hover:bg-muted/20 transition-colors"
                   >
-                    <div className="flex items-center gap-4">
-                      <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-4 min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-shrink-0">
                         {l.zone && (
                           <span className="inline-flex items-center justify-center h-8 w-8 rounded-md bg-primary/10 text-primary text-sm font-bold">
                             {l.zone}
@@ -532,17 +546,38 @@ export default function WarehousesPage() {
                         </div>
                       </div>
                       {l.description && l.code !== l.description && (
-                        <div className="text-xs text-muted-foreground">
+                        <div className="text-xs text-muted-foreground flex-shrink-0">
                           {l.description}
                         </div>
                       )}
+                      {occupied.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5 min-w-0 flex-1 justify-end max-w-[60%]">
+                          {occupied.map((inv: any) => (
+                            <span
+                              key={inv.id}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-700 border border-blue-200 truncate max-w-full"
+                              title={inv.product.name + (inv.product.sku ? ' · ' + inv.product.sku : '')}
+                            >
+                              <Package className="h-3 w-3 flex-shrink-0" />
+                              <span className="truncate">
+                                {inv.product.name}
+                              </span>
+                              <span className="font-semibold flex-shrink-0">×{inv.quantity}</span>
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-muted-foreground italic ml-auto flex-shrink-0">
+                          空库位
+                        </span>
+                      )}
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 flex-shrink-0 ml-3">
                       <span className="font-mono text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
                         {l.code}
                       </span>
                       <div className="flex gap-0.5">
-                        <Button variant="ghost" size="icon" onClick={() => openEditLoc(l)}>
+                        <Button variant="ghost" size="icon" onClick={() => openEditLoc(l as Location)}>
                           <Edit2 className="h-4 w-4" />
                         </Button>
                         <Button
@@ -560,7 +595,7 @@ export default function WarehousesPage() {
                       </div>
                     </div>
                   </div>
-                ))}
+                )})}
               </div>
             )}
           </CardContent>

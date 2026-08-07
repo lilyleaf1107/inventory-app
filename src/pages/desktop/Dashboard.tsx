@@ -68,9 +68,9 @@ export default function DashboardPage() {
     queryKey: ['dashboard-stats'],
     queryFn: async () => {
       const [
-        { data: products },
+        productsRes,
         { data: inventory },
-        { data: warehouses },
+        warehousesRes,
         { data: todayMoves },
         { data: recentMoves },
       ] = await Promise.all([
@@ -115,9 +115,9 @@ export default function DashboardPage() {
         .reduce((sum, m) => sum + Number(m.quantity), 0) || 0
 
       return {
-        productCount: products?.length ?? 0,
+        productCount: productsRes.count ?? 0,
         totalQuantity: totalQty,
-        warehouseCount: warehouses?.length ?? 0,
+        warehouseCount: warehousesRes.count ?? 0,
         todayIn,
         todayOut,
         recentMoves: (recentMoves as unknown as RecentMove[]) || [],

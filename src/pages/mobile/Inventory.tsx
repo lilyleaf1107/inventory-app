@@ -33,6 +33,22 @@ export default function MobileInventory() {
   const { data: inventory, isLoading } = useQuery({
     queryKey: ['inventory', search],
     queryFn: async () => {
+      // 先查产品 ID（PostgREST 深层嵌套过滤有坑）
+      let productIds: string[] | null = null
+      if (search) {
+        const { data: pData, error: pError } = await supabase
+          .from('products')
+          .select('id')
+          .or(
+            `name.ilike.%${search}%,sku.ilike.%${search}%,barcode.ilike.%${search}%`,
+          )
+        if (pError) throw pError
+        productIds = (pData as { id: string }[]).map((r) => r.id)
+        if (productIds.length === 0) {
+          return [] as InventoryItem[]
+        }
+      }
+
       let query = supabase
         .from('inventory')
         .select(`
@@ -43,13 +59,11 @@ export default function MobileInventory() {
         .order('quantity', { ascending: true })
         .order('updated_at', { ascending: false })
 
-      if (search) {
-        query = query.or(
-          `product.name.ilike.%${search}%,product.sku.ilike.%${search}%,product.barcode.ilike.%${search}%`,
-        )
+      if (productIds && productIds.length > 0) {
+        query = query.in('product_id', productIds)
       }
 
-      const { data, error } = await query.limit(100)
+      const { data, error } = await query.limit(300)
       if (error) throw error
       return data as unknown as InventoryItem[]
     },

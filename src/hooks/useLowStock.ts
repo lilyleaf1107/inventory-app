@@ -29,10 +29,10 @@ export interface LowStockItem {
 export type LowStockLevel = 'normal' | 'warning' | 'danger' | 'critical' | 'out'
 
 // 固定阈值（取消 min_stock 输入框，改用固定数量阈值）
-// ≤10: critical(红色), ≤30: danger(橙色), ≤50: warning(黄色), =0: out(缺货)
-export const LOW_STOCK_THRESHOLD_WARNING = 50
-export const LOW_STOCK_THRESHOLD_DANGER = 30
-export const LOW_STOCK_THRESHOLD_CRITICAL = 10
+// ≤5: critical(红色), ≤15: danger(橙色), ≤30: warning(黄色), =0: out(缺货)
+export const LOW_STOCK_THRESHOLD_WARNING = 30
+export const LOW_STOCK_THRESHOLD_DANGER = 15
+export const LOW_STOCK_THRESHOLD_CRITICAL = 5
 
 // 根据库存数量返回预警等级
 export function getLowStockLevel(quantity: number): LowStockLevel {

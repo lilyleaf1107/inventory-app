@@ -121,11 +121,23 @@ export default function MobileWarehouses() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('locations')
-        .select('*')
+        .select(`
+          *,
+          inventory (
+            id, quantity,
+            product:products ( id, name, sku )
+          )
+        `)
         .eq('warehouse_id', activeWh!.id)
         .order('code')
       if (error) throw error
-      return data as Location[]
+      return data as (Location & {
+        inventory?: {
+          id: string
+          quantity: number
+          product: { id: string; name: string; sku: string | null } | null
+        }[]
+      })[]
     },
   })
 
@@ -479,7 +491,9 @@ export default function MobileWarehouses() {
             </div>
           ) : (
             <div className="space-y-2">
-              {locations?.map((l) => (
+              {locations?.map((l) => {
+                const occupied = (l.inventory || []).filter((inv: any) => inv.product)
+                return (
                 <Card key={l.id}>
                   <CardContent className="p-3">
                     <div className="flex items-center justify-between">
@@ -549,9 +563,25 @@ export default function MobileWarehouses() {
                         {l.description}
                       </div>
                     )}
+                    {occupied.length > 0 ? (
+                      <div className="flex flex-wrap gap-1 mt-2 pl-10">
+                        {occupied.map((inv: any) => (
+                          <span
+                            key={inv.id}
+                            className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded border border-blue-200"
+                          >
+                            {inv.product.name} ×{inv.quantity}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-muted-foreground mt-2 pl-10 italic">
+                        空库位
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
-              ))}
+              )})}
             </div>
           )}
         </div>

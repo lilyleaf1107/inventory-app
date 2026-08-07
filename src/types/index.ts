@@ -19,6 +19,17 @@ export interface Product {
   description: string | null
   min_stock: number
   is_material_area: boolean
+  cost: number | null
+  on_shelf: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface Material {
+  id: string
+  name: string
+  spec: string | null
+  is_out_of_stock_marked: boolean
   created_at: string
   updated_at: string
 }

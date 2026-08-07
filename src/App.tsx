@@ -17,6 +17,7 @@ const UsersPage = lazy(() => import('@/pages/desktop/Users'))
 const CategoriesPage = lazy(() => import('@/pages/desktop/Categories'))
 const OutOfStockPage = lazy(() => import('@/pages/desktop/OutOfStock'))
 const LowStockPage = lazy(() => import('@/pages/desktop/LowStock'))
+const MaterialsPage = lazy(() => import('@/pages/desktop/Materials'))
 
 const MobileLayout = lazy(() => import('@/pages/mobile/Layout'))
 const MobileHome = lazy(() => import('@/pages/mobile/Home'))
@@ -30,6 +31,7 @@ const MobileCategories = lazy(() => import('@/pages/mobile/Categories'))
 const MobileUsers = lazy(() => import('@/pages/mobile/Users'))
 const MobileOutOfStock = lazy(() => import('@/pages/mobile/OutOfStock'))
 const MobileLowStock = lazy(() => import('@/pages/mobile/LowStock'))
+const MobileMaterials = lazy(() => import('@/pages/mobile/Materials'))
 
 function Loading() {
   return (
@@ -85,6 +87,7 @@ export default function App() {
           <Route path="moves" element={<MobileMoves />} />
           <Route path="profile" element={<MobileProfile />} />
           <Route path="products" element={<MobileProducts />} />
+          <Route path="materials" element={<MobileMaterials />} />
           <Route path="warehouses" element={<MobileWarehouses />} />
           <Route path="categories" element={<MobileCategories />} />
           <Route path="users" element={<MobileUsers />} />
@@ -106,6 +109,7 @@ export default function App() {
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="m" element={<Navigate to="/m" replace />} />
         <Route path="products" element={<ProductsPage />} />
+        <Route path="materials" element={<MaterialsPage />} />
         <Route path="categories" element={<CategoriesPage />} />
         <Route path="warehouses" element={<WarehousesPage />} />
         <Route path="stock-in" element={<StockInPage />} />

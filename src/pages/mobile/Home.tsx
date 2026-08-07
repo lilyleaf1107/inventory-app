@@ -106,6 +106,14 @@ export default function MobileHome() {
       bgClass: 'bg-sky-50',
     },
     {
+      to: '/m/materials',
+      label: '物料管理',
+      desc: '维护物料清单与缺货标红',
+      icon: Boxes,
+      iconClass: 'text-teal-600',
+      bgClass: 'bg-teal-50',
+    },
+    {
       to: '/m/warehouses',
       label: '仓库管理',
       desc: '仓库与库位',

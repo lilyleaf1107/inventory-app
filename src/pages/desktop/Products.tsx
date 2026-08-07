@@ -47,8 +47,8 @@ interface ProductForm {
   category: string
   spec: string
   unit: string
+  cost: string
   description: string
-  isMaterialArea: boolean
   imageFile: File | null
   imagePreview: string | null
   selectedTagIds: string[]
@@ -62,8 +62,8 @@ const emptyForm: ProductForm = {
   category: '',
   spec: '',
   unit: '个',
+  cost: '',
   description: '',
-  isMaterialArea: false,
   imageFile: null,
   imagePreview: null,
   selectedTagIds: [],
@@ -204,9 +204,10 @@ export default function ProductsPage() {
           category: data.category || null,
           spec: data.spec || null,
           unit: data.unit,
+          cost: data.cost ? Number(data.cost) : null,
           image_path: imagePath,
           description: data.description || null,
-          is_material_area: data.isMaterialArea,
+          on_shelf: true,
         })
         .select()
         .single()
@@ -254,9 +255,9 @@ export default function ProductsPage() {
           category: data.form.category || null,
           spec: data.form.spec || null,
           unit: data.form.unit,
+          cost: data.form.cost ? Number(data.form.cost) : null,
           image_path: imagePath,
           description: data.form.description || null,
-          is_material_area: data.form.isMaterialArea,
           updated_at: new Date().toISOString(),
         })
         .eq('id', data.id)
@@ -288,6 +289,20 @@ export default function ProductsPage() {
       setForm(emptyForm)
     },
     onError: (err: any) => toast.error(err.message || '更新失败'),
+  })
+
+  const toggleShelfMutation = useMutation({
+    mutationFn: async ({ id, value }: { id: string; value: boolean }) => {
+      const { error } = await supabase
+        .from('products')
+        .update({ on_shelf: value, updated_at: new Date().toISOString() })
+        .eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] })
+    },
+    onError: (err: any) => toast.error(err.message || '状态更新失败'),
   })
 
   const deleteMutation = useMutation({
@@ -336,8 +351,8 @@ export default function ProductsPage() {
       category: product.category || '',
       spec: product.spec || '',
       unit: product.unit,
+      cost: product.cost ? String(product.cost) : '',
       description: product.description || '',
-      isMaterialArea: product.is_material_area || false,
       imageFile: null,
       imagePreview: product.image_path ? getProductImageUrl(product.image_path) : null,
       selectedTagIds: [],
@@ -500,11 +515,7 @@ export default function ProductsPage() {
           <button
             key={tag.id}
             onClick={() => toggleTagFilter(tag.id)}
-            className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
-              selectedTagFilter.includes(tag.id)
-                ? 'ring-2 ring-offset-1 ring-primary'
-                : ''
-            } ${getTagColor(index)}`}
+            className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${selectedTagFilter.includes(tag.id) ? 'ring-2 ring-offset-1 ring-primary' : ''} ${getTagColor(index)}`}
           >
             {tag.name}
           </button>
@@ -528,21 +539,23 @@ export default function ProductsPage() {
               <TableHead>分类</TableHead>
               <TableHead>标签</TableHead>
               <TableHead>规格</TableHead>
+              <TableHead>成本</TableHead>
               <TableHead>当前库存</TableHead>
               <TableHead>库位</TableHead>
+              <TableHead>上架状态</TableHead>
               <TableHead className="w-24 text-right">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={12} className="text-center text-muted-foreground py-8">
                   加载中...
                 </TableCell>
               </TableRow>
             ) : products?.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={12} className="text-center text-muted-foreground py-8">
                   暂无产品，点击右上角新增
                 </TableCell>
               </TableRow>
@@ -550,7 +563,6 @@ export default function ProductsPage() {
               products?.map((p) => {
                 const productTags = getProductTags(p)
                 const totalQty = productQtyMap?.get(p.id) || 0
-                const isMaterial = p.is_material_area
                 const isOutOfStock = totalQty === 0
                 const lowStockLevel = getLowStockLevel(totalQty)
                 const lowStockColor = getLowStockLevelColor(lowStockLevel)
@@ -578,16 +590,11 @@ export default function ProductsPage() {
                     <TableCell className="font-medium">
                       <div className="flex items-center flex-wrap gap-1.5">
                         {p.name}
-                        {isMaterial && (
-                          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-blue-100 text-blue-700">
-                            物料
-                          </span>
-                        )}
                         {isOutOfStock && (
                           <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-red-100 text-red-700">
-                            <X className="h-2.5 w-2.5" />
-                            缺货
-                          </span>
+                          <X className="h-2.5 w-2.5" />
+                          缺货
+                        </span>
                         )}
                         {hasLowStock && (
                           <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${lowStockColor.border} ${lowStockColor.text} ${lowStockColor.bg}`}>
@@ -620,8 +627,15 @@ export default function ProductsPage() {
                     </TableCell>
                     <TableCell>{p.spec || '-'}</TableCell>
                     <TableCell>
+                      {p.cost == null ? (
+                        <span className="text-muted-foreground">-</span>
+                      ) : (
+                        <span className="font-mono">¥{Number(p.cost).toFixed(2)}</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
                       <span className={`font-semibold ${isOutOfStock ? 'text-red-700' : hasLowStock ? lowStockColor.text : ''}`}>
-                        {isMaterial ? '***' : totalQty}
+                        {totalQty}
                       </span>
                     </TableCell>
                     <TableCell>
@@ -636,12 +650,30 @@ export default function ProductsPage() {
                               {loc.warehouseName && (
                                 <span className="text-muted-foreground">({loc.warehouseName})</span>
                               )}
-                              {!isMaterial && (
-                                <span className="text-muted-foreground">: {loc.quantity}</span>
-                              )}
+                              <span className="text-muted-foreground">: {loc.quantity}</span>
                             </div>
                           ))}
                         </div>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {canWrite() ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className={p.on_shelf
+                            ? 'border-green-300 bg-green-50 text-green-700 hover:bg-green-100'
+                            : 'border-gray-300 bg-gray-50 text-gray-600 hover:bg-gray-100'}
+                          onClick={() =>
+                            toggleShelfMutation.mutate({ id: p.id, value: !p.on_shelf })}
+                        >
+                          {p.on_shelf ? '已上架' : '未上架'}
+                        </Button>
+                      ) : (
+                        <span className={`inline-flex px-2 py-0.5 rounded text-xs ${p.on_shelf ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                          {p.on_shelf ? '已上架' : '未上架'}
+                        </span>
                       )}
                     </TableCell>
                     <TableCell className="text-right">
@@ -742,19 +774,15 @@ export default function ProductsPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>物料</Label>
-                <div className="flex items-center gap-2 h-10">
-                  <input
-                    type="checkbox"
-                    id="isMaterialArea"
-                    checked={form.isMaterialArea}
-                    onChange={(e) => setForm({ ...form, isMaterialArea: e.target.checked })}
-                    className="h-4 w-4 rounded border-input"
-                  />
-                  <label htmlFor="isMaterialArea" className="text-sm text-muted-foreground">
-                    标记为物料
-                  </label>
-                </div>
+                <Label htmlFor="cost">成本（元）</Label>
+                <Input
+                  id="cost"
+                  type="number"
+                  step="0.01"
+                  value={form.cost}
+                  onChange={(e) => setForm({ ...form, cost: e.target.value })}
+                  placeholder="选填，未填则不显示"
+                />
               </div>
               <div className="md:col-span-2 space-y-2">
                 <Label>产品标签</Label>
@@ -764,11 +792,7 @@ export default function ProductsPage() {
                       key={tag.id}
                       type="button"
                       onClick={() => handleTagToggle(tag.id)}
-                      className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
-                        form.selectedTagIds.includes(tag.id)
-                          ? 'ring-2 ring-offset-1 ring-primary'
-                          : ''
-                      } ${getTagColor(index)}`}
+                      className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${form.selectedTagIds.includes(tag.id) ? 'ring-2 ring-offset-1 ring-primary' : ''} ${getTagColor(index)}`}
                     >
                       {tag.name}
                     </button>

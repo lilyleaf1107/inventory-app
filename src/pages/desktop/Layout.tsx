@@ -16,6 +16,7 @@ import {
   X,
   AlertTriangle,
   Gauge,
+  Boxes,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 import { Button } from '@/components/ui/button'
@@ -36,6 +37,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { to: '/dashboard', label: '工作台', icon: LayoutDashboard },
   { to: '/products', label: '产品管理', icon: Package },
+  { to: '/materials', label: '物料管理', icon: Boxes },
   { to: '/categories', label: '分类管理', icon: FolderOpen },
   { to: '/warehouses', label: '仓库管理', icon: Warehouse },
   { to: '/stock-in', label: '入库', icon: ArrowDownToLine, requireWrite: true },

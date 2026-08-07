@@ -56,12 +56,12 @@ interface ProductForm {
   category: string
   spec: string
   unit: string
+  cost: string
   description: string
   imageFile: File | null
   imagePreview: string | null
   selectedTagIds: string[]
   newTagName: string
-  isMaterialArea: boolean
 }
 
 const emptyForm: ProductForm = {
@@ -71,12 +71,12 @@ const emptyForm: ProductForm = {
   category: '',
   spec: '',
   unit: '个',
+  cost: '',
   description: '',
   imageFile: null,
   imagePreview: null,
   selectedTagIds: [],
   newTagName: '',
-  isMaterialArea: false,
 }
 
 function getTagColor(index: number) {
@@ -212,9 +212,10 @@ export default function MobileProducts() {
           category: data.category || null,
           spec: data.spec || null,
           unit: data.unit,
+          cost: data.cost ? Number(data.cost) : null,
           image_path: imagePath,
           description: data.description || null,
-          is_material_area: data.isMaterialArea,
+          on_shelf: true,
         })
         .select()
         .single()
@@ -265,10 +266,10 @@ export default function MobileProducts() {
           category: data.form.category || null,
           spec: data.form.spec || null,
           unit: data.form.unit,
+          cost: data.form.cost ? Number(data.form.cost) : null,
           image_path: imagePath,
           description: data.form.description || null,
           updated_at: new Date().toISOString(),
-          is_material_area: data.form.isMaterialArea,
         })
         .eq('id', data.id)
       if (error) throw error
@@ -299,6 +300,20 @@ export default function MobileProducts() {
       setForm(emptyForm)
     },
     onError: (err: any) => toast.error(err.message || '更新失败'),
+  })
+
+  const toggleShelfMutation = useMutation({
+    mutationFn: async ({ id, value }: { id: string; value: boolean }) => {
+      const { error } = await supabase
+        .from('products')
+        .update({ on_shelf: value, updated_at: new Date().toISOString() })
+        .eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] })
+    },
+    onError: (err: any) => toast.error(err.message || '状态更新失败'),
   })
 
   const deleteMutation = useMutation({
@@ -347,12 +362,12 @@ export default function MobileProducts() {
       category: product.category || '',
       spec: product.spec || '',
       unit: product.unit,
+      cost: product.cost ? String(product.cost) : '',
       description: product.description || '',
       imageFile: null,
       imagePreview: product.image_path ? getProductImageUrl(product.image_path) : null,
       selectedTagIds: [],
       newTagName: '',
-      isMaterialArea: product.is_material_area || false,
     })
 
     const { data: productTags, error } = await supabase
@@ -516,7 +531,6 @@ export default function MobileProducts() {
           products?.map((p) => {
             const productTags = getProductTags(p)
             const totalQty = productQtyMap?.get(p.id) || 0
-            const isMaterial = p.is_material_area
             const isOutOfStock = totalQty === 0
             const lowStockLevel = getLowStockLevel(totalQty)
             const lowStockColor = getLowStockLevelColor(lowStockLevel)
@@ -544,11 +558,6 @@ export default function MobileProducts() {
                       <div className="flex items-start justify-between gap-2">
                         <div className="font-medium text-sm truncate flex-1 flex flex-wrap items-center gap-1">
                           {p.name}
-                          {isMaterial && (
-                            <span className="px-1 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700">
-                              物料
-                            </span>
-                          )}
                           {isOutOfStock && (
                             <span className="px-1 py-0.5 rounded text-[10px] font-medium bg-red-100 text-red-700">
                               缺货
@@ -580,14 +589,34 @@ export default function MobileProducts() {
                       <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
                         {p.sku && <span className="font-mono">SKU: {p.sku}</span>}
                         {p.category && <span>分类: {p.category}</span>}
+                        {p.cost != null && <span>成本: ¥{Number(p.cost).toFixed(2)}</span>}
                       </div>
-                      {/* 当前库存 + 库位 */}
-                      <div className="mt-1.5 flex items-center gap-2 text-xs">
+                      <div className="mt-1.5 flex flex-wrap gap-1.5 items-center text-xs">
                         <span className="text-muted-foreground">库存:</span>
                         <span className={`font-semibold ${isOutOfStock ? 'text-red-700' : hasLowStock ? lowStockColor.text : ''}`}>
-                          {isMaterial ? '***' : totalQty}
+                          {totalQty}
                         </span>
                         {p.unit && <span className="text-muted-foreground">{p.unit}</span>}
+                        {canWrite() ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 px-2 text-[11px] ml-auto"
+                            onClick={() =>
+                              toggleShelfMutation.mutate({ id: p.id, value: !p.on_shelf })}
+                          >
+                            {p.on_shelf ? '已上架' : '未上架'}
+                          </Button>
+                        ) : (
+                          <span
+                            className={`ml-auto px-2 py-0.5 rounded text-[11px] ${
+                              p.on_shelf ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-600'
+                            }`}
+                          >
+                            {p.on_shelf ? '已上架' : '未上架'}
+                          </span>
+                        )}
                       </div>
                       {locations.length > 0 && (
                         <div className="mt-1 flex flex-wrap gap-1 text-xs">
@@ -595,7 +624,7 @@ export default function MobileProducts() {
                             <span key={idx} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-muted/60 text-muted-foreground">
                               <MapPin className="h-2.5 w-2.5" />
                               <span className="font-mono">{loc.code}</span>
-                              {!isMaterial && <span>: {loc.quantity}</span>}
+                              <span>: {loc.quantity}</span>
                             </span>
                           ))}
                         </div>
@@ -703,22 +732,6 @@ export default function MobileProducts() {
               </div>
 
               <div className="space-y-2">
-                <Label>物料</Label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="isMaterialArea"
-                    checked={form.isMaterialArea}
-                    onChange={(e) => setForm({ ...form, isMaterialArea: e.target.checked })}
-                    className="h-4 w-4 rounded border-input"
-                  />
-                  <label htmlFor="isMaterialArea" className="text-sm text-muted-foreground">
-                    标记为物料
-                  </label>
-                </div>
-              </div>
-
-              <div className="space-y-2">
                 <Label htmlFor="m-barcode">条形码</Label>
                 <Input
                   id="m-barcode"
@@ -754,6 +767,18 @@ export default function MobileProducts() {
                     placeholder="如 500ml"
                   />
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="m-cost">成本（元）</Label>
+                <Input
+                  id="m-cost"
+                  type="number"
+                  step="0.01"
+                  value={form.cost}
+                  onChange={(e) => setForm({ ...form, cost: e.target.value })}
+                  placeholder="选填，未填则不显示"
+                />
               </div>
 
               {/* 标签 */}

@@ -109,6 +109,29 @@ export default function InventoryPage() {
   const { data: inventory, isLoading } = useQuery({
     queryKey: ['inventory', search, warehouseFilter, categoryFilter, selectedTagFilter],
     queryFn: async () => {
+      // 先查询符合条件的产品 ID（PostgREST 不支持跨表深层嵌套过滤）
+      let productIds: string[] | null = null
+      if (search || categoryFilter || selectedTagFilter.length > 0) {
+        let pQuery = supabase.from('products').select('id')
+        if (search) {
+          pQuery = pQuery.or(
+            `name.ilike.%${search}%,sku.ilike.%${search}%,barcode.ilike.%${search}%`,
+          )
+        }
+        if (categoryFilter) {
+          pQuery = pQuery.eq('category', categoryFilter)
+        }
+        if (selectedTagFilter.length > 0) {
+          pQuery = pQuery.filter('product_tags.tag_id', 'in', `(${selectedTagFilter.join(',')})`)
+        }
+        const { data: pData, error: pError } = await pQuery
+        if (pError) throw pError
+        productIds = (pData as { id: string }[]).map((r) => r.id)
+        if (productIds.length === 0) {
+          return [] as InventoryItem[]
+        }
+      }
+
       let query = supabase
         .from('inventory')
         .select(`
@@ -127,21 +150,11 @@ export default function InventoryPage() {
         .order('quantity', { ascending: true })
         .order('updated_at', { ascending: false })
 
-      if (search) {
-        query = query.or(
-          `product.name.ilike.%${search}%,product.sku.ilike.%${search}%,product.barcode.ilike.%${search}%`,
-        )
+      if (productIds && productIds.length > 0) {
+        query = query.in('product_id', productIds)
       }
 
-      if (categoryFilter) {
-        query = query.eq('product.category', categoryFilter)
-      }
-
-      if (selectedTagFilter.length > 0) {
-        query = query.filter('product.product_tags.tag_id', 'in', `(${selectedTagFilter.join(',')})`)
-      }
-
-      const { data, error } = await query.limit(200)
+      const { data, error } = await query.limit(500)
       if (error) throw error
 
       let result = data as unknown as InventoryItem[]

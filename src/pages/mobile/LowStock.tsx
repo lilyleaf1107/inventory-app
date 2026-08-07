@@ -39,15 +39,15 @@ export default function MobileLowStock() {
           </CardContent></Card>
           <Card className="border-yellow-200"><CardContent className="p-2 text-center">
             <div className="text-lg font-bold text-yellow-600">{stats.warning}</div>
-            <div className="text-[10px] text-muted-foreground">≤50</div>
+            <div className="text-[10px] text-muted-foreground">≤30</div>
           </CardContent></Card>
           <Card className="border-orange-200"><CardContent className="p-2 text-center">
             <div className="text-lg font-bold text-orange-600">{stats.danger}</div>
-            <div className="text-[10px] text-muted-foreground">≤30</div>
+            <div className="text-[10px] text-muted-foreground">≤15</div>
           </CardContent></Card>
           <Card className="border-red-200"><CardContent className="p-2 text-center">
             <div className="text-lg font-bold text-red-600">{stats.critical}</div>
-            <div className="text-[10px] text-muted-foreground">≤10</div>
+            <div className="text-[10px] text-muted-foreground">≤5</div>
           </CardContent></Card>
         </div>
 

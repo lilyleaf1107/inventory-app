@@ -29,7 +29,7 @@ export default function LowStockPage() {
             <AlertTriangle className="h-6 w-6" />
             低库存预警
           </h2>
-          <p className="text-sm text-muted-foreground">库存 ≤ {LOW_STOCK_THRESHOLD_WARNING} 的商品（≤50黄色 / ≤30橙色 / ≤10红色）</p>
+          <p className="text-sm text-muted-foreground">库存 ≤ {LOW_STOCK_THRESHOLD_WARNING} 的商品（≤30黄色 / ≤15橙色 / ≤5红色）</p>
         </div>
       </div>
 
@@ -48,7 +48,7 @@ export default function LowStockPage() {
         </Card>
         <Card className="border-yellow-200">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">黄色预警 (≤50)</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">黄色预警 (≤30)</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-yellow-600">{stats.warning}</div>
@@ -56,7 +56,7 @@ export default function LowStockPage() {
         </Card>
         <Card className="border-orange-200">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">橙色预警 (≤30)</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">橙色预警 (≤15)</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-orange-600">{stats.danger}</div>
@@ -64,7 +64,7 @@ export default function LowStockPage() {
         </Card>
         <Card className="border-red-200">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">红色预警 (≤10)</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">红色预警 (≤5)</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-red-600">{stats.critical}</div>

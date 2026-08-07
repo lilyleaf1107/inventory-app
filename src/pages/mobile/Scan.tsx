@@ -116,6 +116,43 @@ export default function MobileScan() {
     return () => stop()
   }, [])
 
+  // 入库模式：选中产品后，预设其最近使用的库位
+  useEffect(() => {
+    let cancelled = false
+    if (!product || mode !== 'in') return
+    ;(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('inventory')
+          .select('location_id')
+          .eq('product_id', product.id)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        if (error) throw error
+        if (!data || cancelled) return
+        const locId = (data as any)?.location_id as string | undefined
+        if (locId) {
+          // 先直接设值，等 allLocations 拉取好后再在下一个 effect 校验匹配
+          setLocationId(locId)
+        }
+      } catch {
+        // 忽略预设失败
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [product?.id, mode])
+
+  // 入库模式：allLocations 拉取完成后，如果已存的 locationId 不在列表里则清掉
+  useEffect(() => {
+    if (mode !== 'in' || !allLocations) return
+    if (!locationId) return
+    const exists = allLocations.some((l: any) => l.id === locationId)
+    if (!exists) setLocationId('')
+  }, [allLocations, locationId, mode])
+
   const stockMoveMutation = useMutation({
     mutationFn: async () => {
       const qty = parseFloat(quantity)
