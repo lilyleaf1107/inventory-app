@@ -310,7 +310,7 @@ export default function MobileMaterials() {
                         toggleMarkedMutation.mutate({ id: m.id, value: !m.is_out_of_stock_marked })
                       }
                     >
-                      {m.is_out_of_stock_marked ? '取消缺货标红' : '一键缺货标红'}
+                      {m.is_out_of_stock_marked ? '缺货' : '正常'}
                     </Button>
                   ) : m.is_out_of_stock_marked ? (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-red-100 text-red-700 font-medium w-full justify-center">

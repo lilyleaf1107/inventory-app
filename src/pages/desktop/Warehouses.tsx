@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Edit2, Trash2, MapPin, Pin, PinOff, ChevronLeft, ChevronRight, Package } from 'lucide-react'
+import { Plus, Edit2, Trash2, MapPin, Pin, PinOff, ChevronLeft, ChevronRight, ChevronDown, Package, Layers, List } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import type { Warehouse, Location } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -73,6 +73,46 @@ function getWhDisplayName(w: Warehouse): string {
   return w.name || w.code
 }
 
+// 库位分组：按 zone → rack 二级分组
+function groupLocations(locs: any[]) {
+  const map = new Map<string, Map<string, any[]>>()
+  for (const l of locs) {
+    const zone = l.zone || '未分区'
+    const rack = l.rack || '未分架'
+    if (!map.has(zone)) map.set(zone, new Map())
+    const rackMap = map.get(zone)!
+    if (!rackMap.has(rack)) rackMap.set(rack, [])
+    rackMap.get(rack)!.push(l)
+  }
+  const sortKey = (a: string, b: string) => {
+    const na = parseInt(a), nb = parseInt(b)
+    if (!isNaN(na) && !isNaN(nb)) return na - nb
+    return a.localeCompare(b)
+  }
+  const sortedZones = Array.from(map.keys()).sort(sortKey)
+  return sortedZones.map((zone) => {
+    const rackMap = map.get(zone)!
+    const sortedRacks = Array.from(rackMap.keys()).sort(sortKey)
+    return {
+      zone,
+      racks: sortedRacks.map((rack) => ({
+        rack,
+        locations: rackMap.get(rack)!,
+      })),
+    }
+  })
+}
+
+// 统计库位占用情况
+function countOccupied(locs: any[]): { total: number; occupied: number } {
+  let occupied = 0
+  for (const l of locs) {
+    const occ = (l.inventory || []).filter((inv: any) => inv.product)
+    if (occ.length > 0) occupied++
+  }
+  return { total: locs.length, occupied }
+}
+
 export default function WarehousesPage() {
   const queryClient = useQueryClient()
 
@@ -87,6 +127,9 @@ export default function WarehousesPage() {
   const [editingLoc, setEditingLoc] = useState<Location | null>(null)
   const [locForm, setLocForm] = useState<LocationForm>(emptyLoc)
   const [locSubmitting, setLocSubmitting] = useState(false)
+  const [locViewMode, setLocViewMode] = useState<'grouped' | 'flat'>('grouped')
+  const [collapsedZones, setCollapsedZones] = useState<Set<string>>(new Set())
+  const [collapsedRacks, setCollapsedRacks] = useState<Set<string>>(new Set())
 
   const { data: warehouses, isLoading } = useQuery({
     queryKey: ['warehouses'],
@@ -325,6 +368,38 @@ export default function WarehousesPage() {
     }
   }
 
+  const toggleZone = (zone: string) => {
+    setCollapsedZones((prev) => {
+      const next = new Set(prev)
+      if (next.has(zone)) next.delete(zone)
+      else next.add(zone)
+      return next
+    })
+  }
+
+  const toggleRack = (zone: string, rack: string) => {
+    const key = `${zone}-${rack}`
+    setCollapsedRacks((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  const expandAllZones = (groups: ReturnType<typeof groupLocations>) => {
+    setCollapsedZones(new Set())
+    setCollapsedRacks(new Set())
+    void groups
+  }
+
+  const collapseAllZones = (groups: ReturnType<typeof groupLocations>) => {
+    const z = new Set<string>()
+    for (const g of groups) z.add(g.zone)
+    setCollapsedZones(z)
+    void groups
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -479,7 +554,7 @@ export default function WarehousesPage() {
 
         {/* 库位列表（占满剩余空间） */}
         <Card className="flex-1 min-w-0">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardHeader className="flex flex-row items-center justify-between pb-2 flex-wrap gap-2">
             <CardTitle className="text-base font-semibold flex items-center gap-2">
               <MapPin className="h-4 w-4" />
               {activeWh ? `${getWhDisplayName(activeWh)} - 库位` : '库位管理'}
@@ -489,12 +564,69 @@ export default function WarehousesPage() {
                 </span>
               )}
             </CardTitle>
-            {activeWh && (
-              <Button size="sm" onClick={openCreateLoc}>
-                <Plus className="mr-1 h-3 w-3" />
-                新增库位
-              </Button>
-            )}
+            <div className="flex items-center gap-2">
+              {activeWh && locations && locations.length > 0 && (
+                <>
+                  <div className="inline-flex rounded-md border overflow-hidden">
+                    <button
+                      type="button"
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium transition-colors ${
+                        locViewMode === 'grouped'
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-background text-muted-foreground hover:bg-muted'
+                      }`}
+                      onClick={() => setLocViewMode('grouped')}
+                      title="分层视图：按区/货架分组折叠"
+                    >
+                      <Layers className="h-3 w-3" />
+                      分层
+                    </button>
+                    <button
+                      type="button"
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium transition-colors ${
+                        locViewMode === 'flat'
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-background text-muted-foreground hover:bg-muted'
+                      }`}
+                      onClick={() => setLocViewMode('flat')}
+                      title="平铺视图：所有库位平铺列表"
+                    >
+                      <List className="h-3 w-3" />
+                      平铺
+                    </button>
+                  </div>
+                  {locViewMode === 'grouped' && (() => {
+                    const groups = groupLocations(locations)
+                    return (
+                      <div className="inline-flex rounded-md border overflow-hidden">
+                        <button
+                          type="button"
+                          className="px-2 py-1 text-xs bg-background text-muted-foreground hover:bg-muted"
+                          onClick={() => expandAllZones(groups)}
+                          title="全部展开"
+                        >
+                          全展开
+                        </button>
+                        <button
+                          type="button"
+                          className="px-2 py-1 text-xs bg-background text-muted-foreground hover:bg-muted border-l"
+                          onClick={() => collapseAllZones(groups)}
+                          title="全部折叠"
+                        >
+                          全折叠
+                        </button>
+                      </div>
+                    )
+                  })()}
+                </>
+              )}
+              {activeWh && (
+                <Button size="sm" onClick={openCreateLoc}>
+                  <Plus className="mr-1 h-3 w-3" />
+                  新增库位
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
             {!activeWh ? (
@@ -505,7 +637,7 @@ export default function WarehousesPage() {
               <div className="text-center py-16 text-muted-foreground text-sm">
                 暂无库位，点击右上角新增
               </div>
-            ) : (
+            ) : locViewMode === 'flat' ? (
               <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
                 {locations?.map((l: any) => {
                   const occupied = (l.inventory || []).filter((inv: any) => inv.product)
@@ -596,6 +728,173 @@ export default function WarehousesPage() {
                     </div>
                   </div>
                 )})}
+              </div>
+            ) : (
+              <div className="max-h-[520px] overflow-y-auto pr-1">
+                {(() => {
+                  const groups = groupLocations(locations || [])
+                  return (
+                    <div className="space-y-2">
+                      {groups.map((g) => {
+                        const zoneStats = countOccupied(
+                          g.racks.flatMap((r) => r.locations),
+                        )
+                        const zoneCollapsed = collapsedZones.has(g.zone)
+                        return (
+                          <div key={g.zone} className="rounded-lg border overflow-hidden">
+                            {/* 区域头 */}
+                            <button
+                              type="button"
+                              className="w-full flex items-center gap-2 px-3 py-2 bg-muted/50 hover:bg-muted transition-colors"
+                              onClick={() => toggleZone(g.zone)}
+                            >
+                              <ChevronDown
+                                className={`h-4 w-4 text-muted-foreground transition-transform ${
+                                  zoneCollapsed ? '-rotate-90' : ''
+                                }`}
+                              />
+                              <span className="inline-flex items-center justify-center h-7 w-7 rounded-md bg-primary/15 text-primary text-sm font-bold">
+                                {g.zone}
+                              </span>
+                              <span className="font-semibold text-sm">
+                                {g.zone}区
+                              </span>
+                              <span className="text-xs text-muted-foreground">
+                                共 {zoneStats.total} 个 · 已占用 {zoneStats.occupied}
+                              </span>
+                              <span className="ml-auto text-xs text-muted-foreground">
+                                {g.racks.length} 个货架
+                              </span>
+                            </button>
+                            {/* 区域内容 */}
+                            {!zoneCollapsed && (
+                              <div className="p-2 space-y-2">
+                                {g.racks.map((r) => {
+                                  const rackStats = countOccupied(r.locations)
+                                  const rackCollapsed = collapsedRacks.has(
+                                    `${g.zone}-${r.rack}`,
+                                  )
+                                  return (
+                                    <div
+                                      key={`${g.zone}-${r.rack}`}
+                                      className="rounded-md border border-muted"
+                                    >
+                                      {/* 货架头 */}
+                                      <button
+                                        type="button"
+                                        className="w-full flex items-center gap-2 px-2.5 py-1.5 bg-muted/30 hover:bg-muted/60 transition-colors"
+                                        onClick={() =>
+                                          toggleRack(g.zone, r.rack)
+                                        }
+                                      >
+                                        <ChevronDown
+                                          className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${
+                                            rackCollapsed ? '-rotate-90' : ''
+                                          }`}
+                                        />
+                                        <span className="text-sm font-medium">
+                                          货架 {r.rack}
+                                        </span>
+                                        <span className="text-xs text-muted-foreground">
+                                          {rackStats.total} 库位 · {rackStats.occupied} 占用
+                                        </span>
+                                      </button>
+                                      {/* 货架内容：库位网格 */}
+                                      {!rackCollapsed && (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 p-2">
+                                          {r.locations.map((l: any) => {
+                                            const occupied = (l.inventory || []).filter(
+                                              (inv: any) => inv.product,
+                                            )
+                                            return (
+                                              <div
+                                                key={l.id}
+                                                className={`flex items-center gap-2 p-2 rounded-md border transition-colors ${
+                                                  occupied.length > 0
+                                                    ? 'border-blue-200 bg-blue-50/30 hover:border-blue-300'
+                                                    : 'border-border hover:border-primary/40 hover:bg-muted/20'
+                                                }`}
+                                              >
+                                                <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                                  <span className="font-mono text-[11px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded flex-shrink-0">
+                                                    {l.level}-{l.position}
+                                                  </span>
+                                                  {occupied.length > 0 ? (
+                                                    <div className="flex flex-wrap gap-1 min-w-0">
+                                                      {occupied.map((inv: any) => (
+                                                        <span
+                                                          key={inv.id}
+                                                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-blue-100 text-blue-700 truncate max-w-full"
+                                                          title={
+                                                            inv.product.name +
+                                                            (inv.product.sku
+                                                              ? ' · ' + inv.product.sku
+                                                              : '')
+                                                          }
+                                                        >
+                                                          <Package className="h-3 w-3 flex-shrink-0" />
+                                                          <span className="truncate">
+                                                            {inv.product.name}
+                                                          </span>
+                                                          <span className="font-semibold flex-shrink-0">
+                                                            ×{inv.quantity}
+                                                          </span>
+                                                        </span>
+                                                      ))}
+                                                    </div>
+                                                  ) : (
+                                                    <span className="text-[11px] text-muted-foreground italic">
+                                                      空库位
+                                                    </span>
+                                                  )}
+                                                </div>
+                                                <span className="font-mono text-[10px] text-muted-foreground/70 flex-shrink-0 hidden lg:inline">
+                                                  {l.code}
+                                                </span>
+                                                <div className="flex gap-0.5 flex-shrink-0">
+                                                  <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-6 w-6"
+                                                    onClick={() =>
+                                                      openEditLoc(l as Location)
+                                                    }
+                                                  >
+                                                    <Edit2 className="h-3 w-3" />
+                                                  </Button>
+                                                  <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-6 w-6 text-destructive"
+                                                    onClick={() => {
+                                                      if (
+                                                        confirm(
+                                                          `确定删除库位「${l.code}」吗？`,
+                                                        )
+                                                      ) {
+                                                        deleteLoc.mutate(l.id)
+                                                      }
+                                                    }}
+                                                  >
+                                                    <Trash2 className="h-3 w-3" />
+                                                  </Button>
+                                                </div>
+                                              </div>
+                                            )
+                                          })}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
               </div>
             )}
           </CardContent>

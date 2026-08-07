@@ -299,10 +299,27 @@ export default function ProductsPage() {
         .eq('id', id)
       if (error) throw error
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['products'] })
+    onMutate: async ({ id, value }) => {
+      await queryClient.cancelQueries({ queryKey: ['products'] })
+      const previousData = queryClient.getQueryData(['products', search, categoryFilter, selectedTagFilter])
+      queryClient.setQueryData(
+        ['products', search, categoryFilter, selectedTagFilter],
+        (old: ProductWithTags[] | undefined) => {
+          if (!old) return old
+          return old.map((p) => (p.id === id ? { ...p, on_shelf: value } : p))
+        },
+      )
+      return { previousData }
     },
-    onError: (err: any) => toast.error(err.message || '状态更新失败'),
+    onError: (_err: any, _vars, context: any) => {
+      if (context?.previousData) {
+        queryClient.setQueryData(
+          ['products', search, categoryFilter, selectedTagFilter],
+          context.previousData,
+        )
+      }
+      toast.error('状态更新失败')
+    },
   })
 
   const deleteMutation = useMutation({

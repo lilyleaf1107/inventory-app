@@ -282,7 +282,7 @@ export default function MaterialsPage() {
                           toggleMarkedMutation.mutate({ id: m.id, value: !m.is_out_of_stock_marked })
                         }
                       >
-                        {m.is_out_of_stock_marked ? '取消标红' : '一键标红'}
+                        {m.is_out_of_stock_marked ? '缺货' : '正常'}
                       </Button>
                     ) : m.is_out_of_stock_marked ? (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-700 font-medium">
