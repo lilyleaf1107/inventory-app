@@ -20,46 +20,62 @@ import {
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Card, CardContent } from '@/components/ui/card'
-import { useOutOfStock } from '@/hooks/useOutOfStock'
-import { useLowStockCount } from '@/hooks/useLowStock'
+import { useOutOfStockCount } from '@/hooks/useOutOfStock'
+import { useLowStockCountLight } from '@/hooks/useLowStock'
 import { useAuthStore } from '@/store/auth'
 
 export default function MobileHome() {
   const { canWrite, canManageUsers } = useAuthStore()
-  const { data: outOfStockItems } = useOutOfStock()
-  const outOfStockCount = outOfStockItems?.length || 0
-  const lowStockCount = useLowStockCount()
 
+  // 轻量 count 查询，不拉完整数据
+  const { data: outOfStockCount } = useOutOfStockCount()
+  const { data: lowStockCount } = useLowStockCountLight()
+
+  // 首页统计：全部用 head count，不拉数据行
   const { data: stats } = useQuery({
-    queryKey: ['mobile-stats'],
+    queryKey: ['mobile-stats-light'],
     queryFn: async () => {
-      const [products, inventory, movesIn, movesOut] = await Promise.all([
-        supabase.from('products').select('id', { count: 'exact', head: true }),
-        supabase.from('inventory').select('quantity').gt('quantity', 0),
-        supabase
-          .from('stock_moves')
-          .select('quantity')
-          .eq('move_type', 'in')
-          .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()),
-        supabase
-          .from('stock_moves')
-          .select('quantity')
-          .eq('move_type', 'out')
-          .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()),
+      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+      const [productRes, invRes, movesInRes, movesOutRes] = await Promise.all([
+        supabase.from('products').select('*', { count: 'exact', head: true }),
+        // 用 RPC 聚合求和，避免拉全量行；如果没有 RPC 则回退 head count
+        supabase.rpc('get_inventory_total_qty'),
+        supabase.rpc('get_week_move_sum', { p_move_type: 'in', p_since: weekAgo }),
+        supabase.rpc('get_week_move_sum', { p_move_type: 'out', p_since: weekAgo }),
       ])
 
-      const totalQty = inventory.data?.reduce((s, i) => s + Number(i.quantity), 0) || 0
-      const weekIn = movesIn.data?.reduce((s, m) => s + Number(m.quantity), 0) || 0
-      const weekOut = movesOut.data?.reduce((s, m) => s + Number(m.quantity), 0) || 0
-
       return {
-        productCount: products.count || 0,
-        totalQty,
-        weekIn,
-        weekOut,
+        productCount: productRes.count || 0,
+        totalQty: typeof invRes.data === 'number' ? invRes.data : 0,
+        weekIn: typeof movesInRes.data === 'number' ? movesInRes.data : 0,
+        weekOut: typeof movesOutRes.data === 'number' ? movesOutRes.data : 0,
       }
     },
+    // 如果 RPC 不存在，回退到轻量查询
+    retry: 0,
   })
+
+  // 回退方案：RPC 不存在时用简单 count
+  const { data: fallbackStats } = useQuery({
+    queryKey: ['mobile-stats-fallback'],
+    queryFn: async () => {
+      const [productRes, invRes] = await Promise.all([
+        supabase.from('products').select('*', { count: 'exact', head: true }),
+        supabase.from('inventory').select('quantity').gt('quantity', 0),
+      ])
+      return {
+        productCount: productRes.count || 0,
+        totalQty: invRes.data?.reduce((s, i: any) => s + Number(i.quantity), 0) || 0,
+      }
+    },
+    enabled: !stats,
+    staleTime: 1000 * 60 * 2,
+  })
+
+  const productCount = stats?.productCount ?? fallbackStats?.productCount ?? 0
+  const totalQty = stats?.totalQty ?? fallbackStats?.totalQty ?? 0
+  const weekIn = stats?.weekIn ?? 0
+  const weekOut = stats?.weekOut ?? 0
 
   // 功能区：日常高频操作（低明度清新淡雅配色）
   const allQuickActions = [
@@ -174,22 +190,22 @@ export default function MobileHome() {
     {
       to: '/m/out-of-stock',
       label: '缺货提醒',
-      desc: outOfStockCount > 0 ? `${outOfStockCount} 个缺货` : '暂无缺货',
+      desc: (outOfStockCount || 0) > 0 ? `${outOfStockCount} 个缺货` : '暂无缺货',
       icon: AlertTriangle,
-      iconClass: outOfStockCount > 0 ? 'text-red-600' : 'text-slate-500',
-      bgClass: outOfStockCount > 0 ? 'bg-red-50' : 'bg-slate-50',
-      badge: outOfStockCount > 0 ? outOfStockCount : undefined,
+      iconClass: (outOfStockCount || 0) > 0 ? 'text-red-600' : 'text-slate-500',
+      bgClass: (outOfStockCount || 0) > 0 ? 'bg-red-50' : 'bg-slate-50',
+      badge: (outOfStockCount || 0) > 0 ? outOfStockCount : undefined,
       requireWrite: false,
       requireAdmin: false,
     },
     {
       to: '/m/low-stock',
       label: '低库存预警',
-      desc: lowStockCount.total > 0 ? `${lowStockCount.total} 个预警` : '库存充足',
+      desc: (lowStockCount || 0) > 0 ? `${lowStockCount} 个预警` : '库存充足',
       icon: Gauge,
-      iconClass: lowStockCount.total > 0 ? 'text-orange-600' : 'text-slate-500',
-      bgClass: lowStockCount.total > 0 ? 'bg-orange-50' : 'bg-slate-50',
-      badge: lowStockCount.total > 0 ? lowStockCount.total : undefined,
+      iconClass: (lowStockCount || 0) > 0 ? 'text-orange-600' : 'text-slate-500',
+      bgClass: (lowStockCount || 0) > 0 ? 'bg-orange-50' : 'bg-slate-50',
+      badge: (lowStockCount || 0) > 0 ? lowStockCount : undefined,
       requireWrite: false,
       requireAdmin: false,
     },
@@ -234,7 +250,7 @@ export default function MobileHome() {
   return (
     <div className="p-4 space-y-4">
       {/* 缺货提示 */}
-      {outOfStockCount > 0 && (
+      {(outOfStockCount || 0) > 0 && (
         <Link to="/m/out-of-stock">
           <Card className="border-red-200 bg-red-50/40">
             <CardContent className="p-3 flex items-center gap-3">
@@ -256,7 +272,7 @@ export default function MobileHome() {
       )}
 
       {/* 低库存提示 */}
-      {lowStockCount.total > 0 && (
+      {(lowStockCount || 0) > 0 && (
         <Link to="/m/low-stock">
           <Card className="border-orange-200 bg-orange-50/40">
             <CardContent className="p-3 flex items-center gap-3">
@@ -265,10 +281,10 @@ export default function MobileHome() {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium text-orange-700">
-                  {lowStockCount.total} 个商品低库存预警
+                  {lowStockCount} 个商品低库存预警
                 </div>
                 <div className="text-xs text-orange-500/80">
-                  黄色 {lowStockCount.warning} · 橙色 {lowStockCount.danger} · 红色 {lowStockCount.critical}
+                  点击查看低库存详情
                 </div>
               </div>
               <ChevronRight className="h-4 w-4 text-orange-400 flex-shrink-0" />
@@ -285,7 +301,7 @@ export default function MobileHome() {
               <Package className="h-3 w-3" />
               产品总数
             </div>
-            <div className="text-xl font-bold mt-1">{stats?.productCount || 0}</div>
+            <div className="text-xl font-bold mt-1">{productCount}</div>
           </CardContent>
         </Card>
         <Card>
@@ -295,7 +311,7 @@ export default function MobileHome() {
               库存数量
             </div>
             <div className="text-xl font-bold mt-1">
-              {stats?.totalQty.toLocaleString() || 0}
+              {totalQty.toLocaleString()}
             </div>
           </CardContent>
         </Card>
@@ -307,7 +323,7 @@ export default function MobileHome() {
                 本周入库
               </div>
               <div className="text-xl font-bold mt-1 text-emerald-600">
-                +{stats?.weekIn || 0}
+                +{weekIn}
               </div>
             </CardContent>
           </Card>
@@ -320,7 +336,7 @@ export default function MobileHome() {
                 本周出库
               </div>
               <div className="text-xl font-bold mt-1 text-amber-600">
-                -{stats?.weekOut || 0}
+                -{weekOut}
               </div>
             </CardContent>
           </Card>

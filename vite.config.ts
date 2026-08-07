@@ -39,6 +39,8 @@ export default defineConfig({
         navigateFallback: '/index.html',
         // 排除 Supabase 请求和图片上传
         navigateFallbackDenylist: [/^https:\/\/.*\.supabase\.co\//],
+        // 大文件（如 zxing 454KB）不预缓存，运行时按需加载即可
+        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
       },
       devOptions: {
         enabled: true,

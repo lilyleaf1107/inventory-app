@@ -130,7 +130,7 @@ export function useLowStock() {
   })
 }
 
-// 获取低库存数量统计
+// 获取低库存数量统计（完整版，用于低库存详情页）
 export function useLowStockCount() {
   const { data } = useLowStock()
   return {
@@ -139,4 +139,22 @@ export function useLowStockCount() {
     danger: data?.filter((i) => getLowStockLevel(i.quantity) === 'danger').length || 0,
     critical: data?.filter((i) => getLowStockLevel(i.quantity) === 'critical').length || 0,
   }
+}
+
+// 轻量版：仅用 count 查询获取总数（首页用，不拉完整数据）
+export function useLowStockCountLight() {
+  const t = getThresholds()
+  return useQuery({
+    queryKey: ['low-stock-count', t.warning],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('inventory')
+        .select('*', { count: 'exact', head: true })
+        .gt('quantity', 0)
+        .lte('quantity', t.warning)
+      if (error) throw error
+      return count || 0
+    },
+    staleTime: 1000 * 60 * 2,
+  })
 }

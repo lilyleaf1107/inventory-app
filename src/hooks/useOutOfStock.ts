@@ -82,6 +82,22 @@ export function useOutOfStock() {
   })
 }
 
+// 轻量版：仅返回缺货数量（首页用，不拉完整数据）
+export function useOutOfStockCount() {
+  return useQuery({
+    queryKey: ['out-of-stock-count'],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('inventory')
+        .select('*', { count: 'exact', head: true })
+        .eq('quantity', 0)
+      if (error) throw error
+      return count || 0
+    },
+    staleTime: 1000 * 60 * 2,
+  })
+}
+
 // 格式化缺货时长，如 "3天5小时" / "2小时30分"
 export function formatOutOfStockDuration(lastOutAt: string | null): string {
   if (!lastOutAt) return '未知'

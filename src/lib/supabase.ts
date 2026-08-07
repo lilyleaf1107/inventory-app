@@ -9,9 +9,34 @@ if (!supabaseUrl || !supabaseAnonKey) {
   )
 }
 
+// 提前建立到 Supabase 的连接（DNS 预解析 + TLS 握手），减少安卓首屏等待
+if (supabaseUrl && typeof document !== 'undefined') {
+  try {
+    const origin = new URL(supabaseUrl).origin
+    const dns = document.createElement('link')
+    dns.rel = 'dns-prefetch'
+    dns.href = origin
+    document.head.appendChild(dns)
+    const pre = document.createElement('link')
+    pre.rel = 'preconnect'
+    pre.href = origin
+    pre.crossOrigin = 'anonymous'
+    document.head.appendChild(pre)
+  } catch {
+    /* ignore */
+  }
+}
+
 export const supabase = createClient(
   supabaseUrl || 'https://placeholder.supabase.co',
   supabaseAnonKey || 'placeholder',
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: false, // 移动端不需要 URL 检测，减少开销
+    },
+  },
 )
 
 export function getPublicUrl(bucket: string, path: string) {
