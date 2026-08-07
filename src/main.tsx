@@ -35,7 +35,27 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <App />
-        <Toaster position="top-right" />
+        <Toaster
+          position={isMobile ? 'bottom-center' : 'top-right'}
+          richColors
+          closeButton
+          // 安卓端关闭动画 + 缩短停留，减少 GPU/主线程消耗
+          pauseWhenPageIsHidden
+          duration={isMobile ? 2200 : 4000}
+          style={isMobile ? { animationDuration: '0ms' } : undefined}
+          toastOptions={
+            isMobile
+              ? {
+                  classNames: {
+                    toast: 'animate-none !duration-0',
+                    title: 'text-sm',
+                    description: 'text-xs',
+                    content: 'py-2',
+                  },
+                }
+              : undefined
+          }
+        />
       </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>,

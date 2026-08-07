@@ -40,7 +40,8 @@ const MobileSettings = lazy(() => import('@/pages/mobile/Settings'))
 const SettingsPage = lazy(() => import('@/pages/desktop/Settings'))
 
 function ProtectedRoute({ children, name }: { children: React.ReactNode; name?: string }) {
-  const { user, loading } = useAuthStore()
+  const user = useAuthStore((s) => s.user)
+  const loading = useAuthStore((s) => s.loading)
   const location = useLocation()
 
   if (loading) return <Loading />
@@ -57,7 +58,8 @@ function ProtectedRoute({ children, name }: { children: React.ReactNode; name?: 
 }
 
 export default function App() {
-  const { checkAuth, loading } = useAuthStore()
+  const checkAuth = useAuthStore((s) => s.checkAuth)
+  const loading = useAuthStore((s) => s.loading)
   const { isMobile } = useDevice()
   const [init, setInit] = useState(false)
 

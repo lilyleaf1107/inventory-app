@@ -1,18 +1,76 @@
-import { useNavigate } from 'react-router-dom'
-import { LogOut, User, Shield } from 'lucide-react'
+import { useMemo } from 'react'
+import { useNavigate, Link } from 'react-router-dom'
+import { LogOut, User, Shield, ChevronRight, List, Users, Settings } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { ROLE_LABELS } from '@/lib/permissions'
+import { shallow } from 'zustand/shallow'
+
+interface EntryItem {
+  to: string
+  label: string
+  desc: string
+  icon: any
+  iconClass: string
+  bgClass: string
+  requireWrite?: boolean
+  requireAdmin?: boolean
+}
 
 export default function MobileProfile() {
-  const { profile, signOut } = useAuthStore()
+  const { profile, signOut, canWrite, canManageUsers } = useAuthStore(
+    (s) => ({
+      profile: s.profile,
+      signOut: s.signOut,
+      canWrite: s.canWrite,
+      canManageUsers: s.canManageUsers,
+    }),
+    shallow,
+  )
   const navigate = useNavigate()
 
   const handleSignOut = async () => {
     await signOut()
     navigate('/login')
   }
+
+  const entries: EntryItem[] = useMemo(() => {
+    const list: EntryItem[] = [
+      {
+        to: '/m/moves',
+        label: '进出库记录',
+        desc: '最近出入库流水',
+        icon: List,
+        iconClass: 'text-slate-600',
+        bgClass: 'bg-slate-50',
+        requireWrite: true,
+      },
+      {
+        to: '/m/users',
+        label: '用户管理',
+        desc: '团队成员与权限',
+        icon: Users,
+        iconClass: 'text-rose-600',
+        bgClass: 'bg-rose-50',
+        requireAdmin: true,
+      },
+      {
+        to: '/m/settings',
+        label: '设置',
+        desc: '外观、预警、数据维护',
+        icon: Settings,
+        iconClass: 'text-slate-600',
+        bgClass: 'bg-slate-50',
+        requireAdmin: true,
+      },
+    ]
+    return list.filter((e) => {
+      if (e.requireWrite && !canWrite()) return false
+      if (e.requireAdmin && !canManageUsers()) return false
+      return true
+    })
+  }, [canWrite, canManageUsers])
 
   return (
     <div className="p-4 space-y-4">
@@ -32,17 +90,33 @@ export default function MobileProfile() {
         </CardContent>
       </Card>
 
-      {/* 提示 */}
-      <div className="text-center text-xs text-muted-foreground py-2">
-        所有功能入口请在「首页」查看
-      </div>
+      {/* 管理入口（由首页迁移过来） */}
+      {entries.length > 0 && (
+        <section>
+          <h2 className="text-sm font-semibold mb-2 px-1">管理</h2>
+          <div className="grid grid-cols-1 gap-2">
+            {entries.map((e) => (
+              <Link key={e.to} to={e.to}>
+                <Card>
+                  <CardContent className="p-3 flex items-center gap-3">
+                    <div className={`${e.bgClass} rounded-lg h-10 w-10 flex items-center justify-center flex-shrink-0`}>
+                      <e.icon className={`h-5 w-5 ${e.iconClass}`} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm">{e.label}</div>
+                      <div className="text-xs text-muted-foreground truncate">{e.desc}</div>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground/60 flex-shrink-0" />
+                  </CardContent>
+                </Card>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* 退出登录 */}
-      <Button
-        variant="outline"
-        className="w-full"
-        onClick={handleSignOut}
-      >
+      <Button variant="outline" className="w-full" onClick={handleSignOut}>
         <LogOut className="mr-2 h-4 w-4" />
         退出登录
       </Button>

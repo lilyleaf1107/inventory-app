@@ -7,7 +7,7 @@
  */
 
 // ============ 类型 ============
-export type ThemeName = 'inkstone' | 'celadon' | 'mistblue' | 'lotus' | 'warmclay'
+export type ThemeName = 'lightgreen' | 'ricewhite' | 'softpurple' | 'lightred' | 'softblue'
 
 export interface AppSettings {
   theme: ThemeName
@@ -23,7 +23,7 @@ export interface AppSettings {
 
 // ============ 默认值 ============
 export const DEFAULT_SETTINGS: AppSettings = {
-  theme: 'inkstone',
+  theme: 'softblue',
   lowStockWarning: 30,
   lowStockDanger: 15,
   lowStockCritical: 5,
@@ -44,11 +44,11 @@ export interface ThemeMeta {
 }
 
 export const THEMES: ThemeMeta[] = [
-  { key: 'inkstone', label: '墨石', desc: '沉稳灰黑', swatch: '#1e1e24' },
-  { key: 'celadon', label: '青瓷', desc: '清雅青绿', swatch: '#3a6b62' },
-  { key: 'mistblue', label: '雾蓝', desc: '静谧蓝灰', swatch: '#3a5878' },
-  { key: 'lotus', label: '藕荷', desc: '柔和藕紫', swatch: '#5a4a6b' },
-  { key: 'warmclay', label: '暖陶', desc: '温润陶土', swatch: '#7a4a35' },
+  { key: 'lightgreen', label: '浅绿', desc: '清新草绿调', swatch: '#8ec9a4' },
+  { key: 'ricewhite', label: '米白', desc: '温润米黄调', swatch: '#ece4d1' },
+  { key: 'softpurple', label: '淡紫', desc: '柔和薰衣草', swatch: '#c7b7e0' },
+  { key: 'lightred', label: '浅红', desc: '淡雅蜜桃粉', swatch: '#eab8b8' },
+  { key: 'softblue', label: '淡蓝', desc: '晴空浅蓝调', swatch: '#a7c5d8' },
 ]
 
 // ============ 存储 ============
@@ -60,7 +60,12 @@ export function getSettings(): AppSettings {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return DEFAULT_SETTINGS
     const parsed = JSON.parse(raw)
-    return { ...DEFAULT_SETTINGS, ...parsed }
+    // 如果老主题名存在，自动迁移为默认淡蓝
+    const next: AppSettings = { ...DEFAULT_SETTINGS, ...parsed }
+    if (!(['lightgreen', 'ricewhite', 'softpurple', 'lightred', 'softblue'] as const).includes(next.theme)) {
+      next.theme = DEFAULT_SETTINGS.theme
+    }
+    return next
   } catch {
     return DEFAULT_SETTINGS
   }
@@ -90,19 +95,17 @@ export function resetSettings(): AppSettings {
 }
 
 // ============ 主题应用 ============
-const THEME_CLASSES: ThemeName[] = ['inkstone', 'celadon', 'mistblue', 'lotus', 'warmclay']
+const THEME_CLASSES: ThemeName[] = ['lightgreen', 'ricewhite', 'softpurple', 'lightred', 'softblue']
 
 export function applyTheme(theme: ThemeName) {
   if (typeof document === 'undefined') return
   const el = document.documentElement
-  // 移除所有主题类
   for (const t of THEME_CLASSES) {
     el.classList.remove(`theme-${t}`)
   }
-  // inkstone 是默认 :root，不需要额外 class
-  if (theme !== 'inkstone') {
-    el.classList.add(`theme-${theme}`)
-  }
+  el.classList.add(`theme-${theme}`)
+  // 让 sonner / 自定义组件也能根据当前主题变量感知
+  el.setAttribute('data-theme', theme)
 }
 
 /** 在应用启动时调用，从 localStorage 恢复主题 */

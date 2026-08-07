@@ -54,18 +54,24 @@ export default defineConfig({
     },
   },
   build: {
+    target: ['es2019', 'edge88', 'chrome78', 'safari13'],
+    cssCodeSplit: true,
+    minify: 'esbuild',
     rollupOptions: {
       output: {
         manualChunks: {
-          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'react': ['react', 'react-dom', 'react-router-dom', 'scheduler'],
           'supabase': ['@supabase/supabase-js'],
-          'query': ['@tanstack/react-query'],
+          'react-query': ['@tanstack/react-query'],
           'zxing': ['@zxing/browser', '@zxing/library'],
-          'ui': ['lucide-react', '@radix-ui/react-select', 'sonner'],
+          'lucide': ['lucide-react'],
+          'sonner': ['sonner'],
+          'radix': ['@radix-ui/react-select'],
+          'utils': ['class-variance-authority', 'clsx', 'tailwind-merge', 'zustand'],
         },
       },
     },
-    chunkSizeWarningLimit: 600,
+    chunkSizeWarningLimit: 1024,
   },
   server: {
     port: 5173,
