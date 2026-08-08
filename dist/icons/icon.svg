@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#0f172a" rx="96"/>
+  <!-- 包装箱主体 -->
+  <g transform="translate(128, 128)">
+    <!-- 箱子正面 -->
+    <rect x="32" y="80" width="192" height="160" fill="#f59e0b" rx="4"/>
+    <!-- 箱子顶部（梯形透视） -->
+    <path d="M 32 80 L 80 32 L 272 32 L 224 80 Z" fill="#fbbf24"/>
+    <!-- 箱子右侧（透视） -->
+    <path d="M 224 80 L 272 32 L 272 192 L 224 240 Z" fill="#d97706"/>
+    <!-- 顶部封箱带 -->
+    <rect x="112" y="32" width="32" height="48" fill="#92400e"/>
+    <rect x="112" y="80" width="32" height="160" fill="#92400e"/>
+    <!-- 入库箭头（向下） -->
+    <path d="M 128 120 L 128 180 M 108 160 L 128 180 L 148 160" stroke="#ffffff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+</svg>
