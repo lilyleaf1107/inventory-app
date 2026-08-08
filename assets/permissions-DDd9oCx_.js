@@ -1,1 +1,0 @@
-const n={super_admin:"超级管理员",admin:"管理员",warehouse_manager:"库管",staff:"员工"};function i(r,e){return e?e.role==="super_admin"?r.id!==e.id:e.role==="admin"?r.role!=="super_admin":!1:!1}function u(r,e){return e?e.role==="super_admin"?!0:e.role==="admin"?r!=="super_admin":!1:!1}export{n as R,u as a,i as c};
