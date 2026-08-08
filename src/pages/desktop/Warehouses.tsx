@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Edit2, Trash2, MapPin, Pin, PinOff, ChevronLeft, ChevronRight, ChevronDown, Package, Layers, List } from 'lucide-react'
+import { Plus, Edit2, Trash2, MapPin, Pin, PinOff, ChevronLeft, ChevronRight, ChevronDown, Package, Layers, List, X } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import type { Warehouse, Location } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -328,6 +328,21 @@ export default function WarehousesPage() {
       queryClient.invalidateQueries({ queryKey: ['locations', activeWh?.id] })
     },
     onError: (err: any) => toast.error(err.message || '删除失败'),
+  })
+
+  // 从库位移除商品（删除 inventory 记录）
+  const deleteInv = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('inventory').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success('已从库位移除')
+      queryClient.invalidateQueries({ queryKey: ['locations', activeWh?.id] })
+      queryClient.invalidateQueries({ queryKey: ['products-qty-map'] })
+      queryClient.invalidateQueries({ queryKey: ['products-locations-map'] })
+    },
+    onError: (err: any) => toast.error(err.message || '移除失败'),
   })
 
   const openCreateWh = () => {
@@ -728,6 +743,18 @@ export default function WarehousesPage() {
                                 {inv.product.name}
                               </span>
                               <span className="font-semibold flex-shrink-0">×{inv.quantity}</span>
+                              <button
+                                type="button"
+                                className="ml-0.5 flex-shrink-0 hover:text-destructive transition-colors"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  if (confirm(`确定从该库位移除「${inv.product.name}」吗？`)) {
+                                    deleteInv.mutate(inv.id)
+                                  }
+                                }}
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
                             </span>
                           ))}
                         </div>
@@ -904,6 +931,18 @@ export default function WarehousesPage() {
                                                                     <span className="font-semibold flex-shrink-0">
                                                                       ×{inv.quantity}
                                                                     </span>
+                                                                    <button
+                                                                      type="button"
+                                                                      className="ml-0.5 flex-shrink-0 hover:text-destructive transition-colors"
+                                                                      onClick={(e) => {
+                                                                        e.stopPropagation()
+                                                                        if (confirm(`确定从该库位移除「${inv.product.name}」吗？`)) {
+                                                                          deleteInv.mutate(inv.id)
+                                                                        }
+                                                                      }}
+                                                                    >
+                                                                      <X className="h-3 w-3" />
+                                                                    </button>
                                                                   </span>
                                                                 ))}
                                                               </div>

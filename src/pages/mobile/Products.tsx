@@ -97,6 +97,9 @@ export default function MobileProducts() {
   const [editing, setEditing] = useState<Product | null>(null)
   const [form, setForm] = useState<ProductForm>(emptyForm)
   const [submitting, setSubmitting] = useState(false)
+  const [editingProductId, setEditingProductId] = useState<string | null>(null)
+  const [newLocId, setNewLocId] = useState('')
+  const [newLocQty, setNewLocQty] = useState('')
 
   const { data: categories } = useQuery({
     queryKey: ['categories'],
@@ -171,6 +174,41 @@ export default function MobileProducts() {
     staleTime: 30 * 1000,
   })
 
+  // 编辑时加载该产品的库存明细
+  const { data: productInventory } = useQuery({
+    queryKey: ['product-inventory-edit', editingProductId],
+    enabled: !!editingProductId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('inventory')
+        .select(`
+          id, quantity,
+          location:locations ( id, code, zone, rack, level, position, warehouse:warehouses ( id, name, code ) )
+        `)
+        .eq('product_id', editingProductId)
+        .order('updated_at', { ascending: false })
+      if (error) throw error
+      return data as any[]
+    },
+  })
+
+  // 所有库位（用于添加库位选择）
+  const { data: allLocations } = useQuery({
+    queryKey: ['all-locations-for-select'],
+    enabled: !!editingProductId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('locations')
+        .select(`
+          id, code, zone, rack, level, position,
+          warehouse:warehouses ( id, name, code )
+        `)
+        .order('code')
+      if (error) throw error
+      return data as any[]
+    },
+  })
+
   const { data: products, isLoading } = useQuery({
     queryKey: ['products', search, categoryFilter],
     queryFn: async () => {
@@ -239,6 +277,7 @@ export default function MobileProducts() {
       toast.success('产品创建成功')
       queryClient.invalidateQueries({ queryKey: ['products'] })
       setDialogOpen(false)
+      setEditingProductId(null)
       setForm(emptyForm)
     },
     onError: (err: any) => toast.error(err.message || '创建失败'),
@@ -297,6 +336,7 @@ export default function MobileProducts() {
       queryClient.invalidateQueries({ queryKey: ['products'] })
       setDialogOpen(false)
       setEditing(null)
+      setEditingProductId(null)
       setForm(emptyForm)
     },
     onError: (err: any) => toast.error(err.message || '更新失败'),
@@ -364,14 +404,75 @@ export default function MobileProducts() {
     onError: (err: any) => toast.error(err.message || '创建标签失败'),
   })
 
+  // 更新库存数量
+  const updateInvQty = useMutation({
+    mutationFn: async ({ id, quantity }: { id: string; quantity: number }) => {
+      const { error } = await supabase
+        .from('inventory')
+        .update({ quantity, updated_at: new Date().toISOString() })
+        .eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['product-inventory-edit', editingProductId] })
+      queryClient.invalidateQueries({ queryKey: ['products-qty-map'] })
+      queryClient.invalidateQueries({ queryKey: ['products-locations-map'] })
+    },
+    onError: (err: any) => toast.error(err.message || '更新数量失败'),
+  })
+
+  // 删除某库位的库存
+  const deleteInv = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('inventory').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success('已移除')
+      queryClient.invalidateQueries({ queryKey: ['product-inventory-edit', editingProductId] })
+      queryClient.invalidateQueries({ queryKey: ['products-qty-map'] })
+      queryClient.invalidateQueries({ queryKey: ['products-locations-map'] })
+    },
+    onError: (err: any) => toast.error(err.message || '移除失败'),
+  })
+
+  // 添加新库位库存
+  const addInv = useMutation({
+    mutationFn: async ({ locationId, quantity }: { locationId: string; quantity: number }) => {
+      const { error } = await supabase
+        .from('inventory')
+        .insert({
+          product_id: editingProductId,
+          location_id: locationId,
+          quantity,
+        })
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success('已添加库位')
+      queryClient.invalidateQueries({ queryKey: ['product-inventory-edit', editingProductId] })
+      queryClient.invalidateQueries({ queryKey: ['products-qty-map'] })
+      queryClient.invalidateQueries({ queryKey: ['products-locations-map'] })
+      setNewLocId('')
+      setNewLocQty('')
+    },
+    onError: (err: any) => toast.error(err.message || '添加失败'),
+  })
+
   const openCreate = () => {
     setEditing(null)
+    setEditingProductId(null)
+    setNewLocId('')
+    setNewLocQty('')
     setForm(emptyForm)
     setDialogOpen(true)
   }
 
   const openEdit = async (product: Product) => {
     setEditing(product)
+    setEditingProductId(product.id)
+    setNewLocId('')
+    setNewLocQty('')
     setForm({
       sku: product.sku || '',
       name: product.name,
@@ -857,6 +958,90 @@ export default function MobileProducts() {
                   placeholder="产品详细描述"
                 />
               </div>
+
+              {editing && editingProductId && (
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-1">
+                    <MapPin className="h-3.5 w-3.5" />
+                    库存与库位
+                    <span className="text-[10px] text-muted-foreground font-normal">（即时保存）</span>
+                  </Label>
+                  {productInventory && productInventory.length > 0 ? (
+                    <div className="space-y-1.5 rounded-md border p-2">
+                      {productInventory.map((inv: any) => (
+                        <div key={inv.id} className="flex items-center gap-1.5">
+                          <span className="font-mono text-[10px] bg-muted px-1.5 py-1 rounded flex-shrink-0">
+                            {inv.location?.code || '-'}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground flex-shrink-0 truncate flex-1 min-w-0">
+                            {inv.location?.warehouse?.name || inv.location?.warehouse?.code || ''}
+                          </span>
+                          <input
+                            type="number"
+                            className="w-16 h-7 rounded-md border border-input bg-background px-1.5 text-xs"
+                            defaultValue={inv.quantity}
+                            onBlur={(e) => {
+                              const newQty = Number(e.target.value)
+                              if (newQty !== inv.quantity && newQty >= 0) {
+                                updateInvQty.mutate({ id: inv.id, quantity: newQty })
+                              }
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="p-1 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors flex-shrink-0"
+                            onClick={() => {
+                              if (confirm(`确定从该库位移除吗？`)) {
+                                deleteInv.mutate(inv.id)
+                              }
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-muted-foreground py-1">暂无库存记录</div>
+                  )}
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={newLocId}
+                      onChange={(e) => setNewLocId(e.target.value)}
+                      className="flex-1 min-w-0 h-7 rounded-md border border-input bg-background px-1.5 text-xs"
+                    >
+                      <option value="">选择库位...</option>
+                      {allLocations
+                        ?.filter((loc: any) =>
+                          !productInventory?.some((inv: any) => inv.location?.id === loc.id)
+                        )
+                        .map((loc: any) => (
+                          <option key={loc.id} value={loc.id}>
+                            {loc.code}
+                          </option>
+                        ))}
+                    </select>
+                    <input
+                      type="number"
+                      value={newLocQty}
+                      onChange={(e) => setNewLocQty(e.target.value)}
+                      placeholder="数量"
+                      className="w-16 h-7 rounded-md border border-input bg-background px-1.5 text-xs"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-7 px-2 text-xs flex-shrink-0"
+                      disabled={!newLocId || !newLocQty}
+                      onClick={() => {
+                        addInv.mutate({ locationId: newLocId, quantity: Number(newLocQty) })
+                      }}
+                    >
+                      添加
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
             <DialogFooter className="px-4 pb-4">
               <Button

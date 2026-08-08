@@ -16,6 +16,7 @@ import {
   Layers,
   List,
   Package,
+  X,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import type { Warehouse, Location } from '@/types'
@@ -336,6 +337,21 @@ export default function MobileWarehouses() {
       queryClient.invalidateQueries({ queryKey: ['locations', activeWh?.id] })
     },
     onError: (err: any) => toast.error(err.message || '删除失败'),
+  })
+
+  // 从库位移除商品（删除 inventory 记录）
+  const deleteInv = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('inventory').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success('已从库位移除')
+      queryClient.invalidateQueries({ queryKey: ['locations', activeWh?.id] })
+      queryClient.invalidateQueries({ queryKey: ['products-qty-map'] })
+      queryClient.invalidateQueries({ queryKey: ['products-locations-map'] })
+    },
+    onError: (err: any) => toast.error(err.message || '移除失败'),
   })
 
   const openCreateWh = () => {
@@ -736,9 +752,21 @@ export default function MobileWarehouses() {
                         {occupied.map((inv: any) => (
                           <span
                             key={inv.id}
-                            className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded border border-blue-200"
+                            className="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded border border-blue-200"
                           >
                             {inv.product.name} ×{inv.quantity}
+                            <button
+                              type="button"
+                              className="ml-0.5 hover:text-destructive transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                if (confirm(`确定从该库位移除「${inv.product.name}」吗？`)) {
+                                  deleteInv.mutate(inv.id)
+                                }
+                              }}
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
                           </span>
                         ))}
                       </div>
@@ -885,6 +913,18 @@ export default function MobileWarehouses() {
                                                               <span className="font-semibold flex-shrink-0">
                                                                 ×{inv.quantity}
                                                               </span>
+                                                              <button
+                                                                type="button"
+                                                                className="ml-0.5 flex-shrink-0 hover:text-destructive transition-colors"
+                                                                onClick={(e) => {
+                                                                  e.stopPropagation()
+                                                                  if (confirm(`确定从该库位移除「${inv.product.name}」吗？`)) {
+                                                                    deleteInv.mutate(inv.id)
+                                                                  }
+                                                                }}
+                                                              >
+                                                                <X className="h-3 w-3" />
+                                                              </button>
                                                             </span>
                                                           ))}
                                                         </div>

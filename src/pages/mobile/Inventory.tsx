@@ -118,7 +118,6 @@ export default function MobileInventory() {
           location:locations ( id, code, warehouse:warehouses ( id, code, name ) )
         `,
         )
-        .order('quantity', { ascending: true })
         .order('updated_at', { ascending: false })
 
       if (productIds && productIds.length > 0) query = query.in('product_id', productIds)
@@ -126,7 +125,15 @@ export default function MobileInventory() {
 
       const { data, error } = await query.limit(500)
       if (error) throw error
-      return data as unknown as InventoryItem[]
+
+      // 按库位排列：仓库 → 库位编码
+      const sorted = (data as unknown as InventoryItem[]).slice().sort((a, b) => {
+        const wA = (a.location.warehouse?.name || a.location.warehouse?.code || '').toString()
+        const wB = (b.location.warehouse?.name || b.location.warehouse?.code || '').toString()
+        if (wA !== wB) return wA.localeCompare(wB, 'zh-CN')
+        return (a.location.code || '').localeCompare(b.location.code || '')
+      })
+      return sorted
     },
   })
 

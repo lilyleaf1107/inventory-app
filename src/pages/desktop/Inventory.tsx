@@ -147,7 +147,6 @@ export default function InventoryPage() {
             warehouse:warehouses ( id, name, code )
           )
         `)
-        .order('quantity', { ascending: true })
         .order('updated_at', { ascending: false })
 
       if (productIds && productIds.length > 0) {
@@ -162,6 +161,14 @@ export default function InventoryPage() {
       if (warehouseFilter) {
         result = result.filter((i) => i.location.warehouse.id === warehouseFilter)
       }
+
+      // 按库位排列：仓库 → 库位编码
+      result.sort((a, b) => {
+        const wA = (a.location.warehouse.name || a.location.warehouse.code || '').toString()
+        const wB = (b.location.warehouse.name || b.location.warehouse.code || '').toString()
+        if (wA !== wB) return wA.localeCompare(wB, 'zh-CN')
+        return (a.location.code || '').localeCompare(b.location.code || '')
+      })
 
       return result
     },
