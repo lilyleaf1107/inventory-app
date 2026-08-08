@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -404,7 +404,7 @@ export default function MobileProducts() {
     onError: (err: any) => toast.error(err.message || '创建标签失败'),
   })
 
-  // 更新库存数量
+  // 更新库存数量 - 乐观更新
   const updateInvQty = useMutation({
     mutationFn: async ({ id, quantity }: { id: string; quantity: number }) => {
       const { error } = await supabase
@@ -413,50 +413,172 @@ export default function MobileProducts() {
         .eq('id', id)
       if (error) throw error
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['product-inventory-edit', editingProductId] })
-      queryClient.invalidateQueries({ queryKey: ['products-qty-map'] })
-      queryClient.invalidateQueries({ queryKey: ['products-locations-map'] })
+    onMutate: async ({ id, quantity }) => {
+      const invKey = ['product-inventory-edit', editingProductId] as const
+      await queryClient.cancelQueries({ queryKey: invKey })
+      const prevInv = queryClient.getQueryData<any[]>(invKey)
+      queryClient.setQueryData(invKey, (old: any[] | undefined) =>
+        old?.map((inv) => (inv.id === id ? { ...inv, quantity } : inv)),
+      )
+      const qtyKey = ['products-qty-map'] as const
+      const prevQty = queryClient.getQueryData<Map<string, number>>(qtyKey)
+      if (prevInv && prevQty && editingProductId) {
+        const oldItem = prevInv.find((i) => i.id === id)
+        if (oldItem) {
+          const diff = quantity - Number(oldItem.quantity || 0)
+          const next = new Map(prevQty)
+          next.set(editingProductId, (next.get(editingProductId) || 0) + diff)
+          queryClient.setQueryData(qtyKey, next)
+        }
+      }
+      const locKey = ['products-locations-map'] as const
+      const prevLoc = queryClient.getQueryData<Map<string, any[]>>(locKey)
+      if (prevInv && prevLoc && editingProductId) {
+        const oldItem = prevInv.find((i: any) => i.id === id)
+        if (oldItem?.location) {
+          const list = prevLoc.get(editingProductId) || []
+          const next = list.map((l: any) =>
+            l.code === oldItem.location.code ? { ...l, quantity } : l,
+          )
+          const newMap = new Map(prevLoc)
+          newMap.set(editingProductId, next)
+          queryClient.setQueryData(locKey, newMap)
+        }
+      }
+      return { prevInv, prevQty, prevLoc, invKey, qtyKey, locKey }
     },
-    onError: (err: any) => toast.error(err.message || '更新数量失败'),
+    onError: (err: any, _vars, ctx: any) => {
+      if (ctx) {
+        if (ctx.prevInv !== undefined) queryClient.setQueryData(ctx.invKey, ctx.prevInv)
+        if (ctx.prevQty !== undefined) queryClient.setQueryData(ctx.qtyKey, ctx.prevQty)
+        if (ctx.prevLoc !== undefined) queryClient.setQueryData(ctx.locKey, ctx.prevLoc)
+      }
+      toast.error(err.message || '更新数量失败')
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['product-inventory-edit', editingProductId], refetchType: 'none' })
+    },
   })
 
-  // 删除某库位的库存
+  // 删除某库位的库存 - 乐观更新
   const deleteInv = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('inventory').delete().eq('id', id)
       if (error) throw error
     },
+    onMutate: async (id: string) => {
+      const invKey = ['product-inventory-edit', editingProductId] as const
+      await queryClient.cancelQueries({ queryKey: invKey })
+      const prevInv = queryClient.getQueryData<any[]>(invKey)
+      const deleted = prevInv?.find((i) => i.id === id)
+      queryClient.setQueryData(invKey, (old: any[] | undefined) =>
+        old?.filter((inv) => inv.id !== id),
+      )
+      const qtyKey = ['products-qty-map'] as const
+      const prevQty = queryClient.getQueryData<Map<string, number>>(qtyKey)
+      if (deleted && prevQty && editingProductId) {
+        const q = Number(deleted.quantity || 0)
+        const next = new Map(prevQty)
+        next.set(editingProductId, Math.max(0, (next.get(editingProductId) || 0) - q))
+        queryClient.setQueryData(qtyKey, next)
+      }
+      const locKey = ['products-locations-map'] as const
+      const prevLoc = queryClient.getQueryData<Map<string, any[]>>(locKey)
+      if (deleted?.location && prevLoc && editingProductId) {
+        const list = prevLoc.get(editingProductId) || []
+        const next = list.filter((l: any) => l.code !== deleted.location.code)
+        const newMap = new Map(prevLoc)
+        newMap.set(editingProductId, next)
+        queryClient.setQueryData(locKey, newMap)
+      }
+      return { prevInv, prevQty, prevLoc, invKey, qtyKey, locKey }
+    },
     onSuccess: () => {
       toast.success('已移除')
-      queryClient.invalidateQueries({ queryKey: ['product-inventory-edit', editingProductId] })
-      queryClient.invalidateQueries({ queryKey: ['products-qty-map'] })
-      queryClient.invalidateQueries({ queryKey: ['products-locations-map'] })
+      queryClient.invalidateQueries({ queryKey: ['product-inventory-edit', editingProductId], refetchType: 'none' })
     },
-    onError: (err: any) => toast.error(err.message || '移除失败'),
+    onError: (err: any, _vars, ctx: any) => {
+      if (ctx) {
+        if (ctx.prevInv !== undefined) queryClient.setQueryData(ctx.invKey, ctx.prevInv)
+        if (ctx.prevQty !== undefined) queryClient.setQueryData(ctx.qtyKey, ctx.prevQty)
+        if (ctx.prevLoc !== undefined) queryClient.setQueryData(ctx.locKey, ctx.prevLoc)
+      }
+      toast.error(err.message || '移除失败')
+    },
   })
 
-  // 添加新库位库存
+  // 添加新库位库存 - 乐观更新
   const addInv = useMutation({
     mutationFn: async ({ locationId, quantity }: { locationId: string; quantity: number }) => {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('inventory')
         .insert({
           product_id: editingProductId,
           location_id: locationId,
           quantity,
         })
+        .select(`
+          id, quantity,
+          location:locations ( id, code, zone, rack, level, position, warehouse:warehouses ( id, name, code ) )
+        `)
+        .single()
       if (error) throw error
+      return data
+    },
+    onMutate: async ({ locationId, quantity }) => {
+      const invKey = ['product-inventory-edit', editingProductId] as const
+      const locsKey = ['all-locations-for-select'] as const
+      await queryClient.cancelQueries({ queryKey: invKey })
+      const prevInv = queryClient.getQueryData<any[]>(invKey)
+      const prevLocs = queryClient.getQueryData<any[]>(locsKey)
+      const selLoc = prevLocs?.find((l) => l.id === locationId)
+      if (selLoc && prevInv) {
+        const tempItem: any = {
+          id: `temp-${Date.now()}`,
+          quantity,
+          location: selLoc,
+        }
+        queryClient.setQueryData(invKey, [tempItem, ...prevInv])
+      }
+      const qtyKey = ['products-qty-map'] as const
+      const prevQty = queryClient.getQueryData<Map<string, number>>(qtyKey)
+      if (prevQty && editingProductId) {
+        const next = new Map(prevQty)
+        next.set(editingProductId, (next.get(editingProductId) || 0) + Number(quantity || 0))
+        queryClient.setQueryData(qtyKey, next)
+      }
+      const locMapKey = ['products-locations-map'] as const
+      const prevLoc = queryClient.getQueryData<Map<string, any[]>>(locMapKey)
+      if (selLoc && prevLoc && editingProductId) {
+        const list = prevLoc.get(editingProductId) || []
+        const next = [
+          ...list,
+          {
+            code: selLoc.code,
+            warehouseName: selLoc.warehouse?.name || selLoc.warehouse?.code || null,
+            quantity: Number(quantity) || 0,
+          },
+        ]
+        const newMap = new Map(prevLoc)
+        newMap.set(editingProductId, next)
+        queryClient.setQueryData(locMapKey, newMap)
+      }
+      return { prevInv, prevQty, prevLoc, invKey, qtyKey, locMapKey }
     },
     onSuccess: () => {
       toast.success('已添加库位')
       queryClient.invalidateQueries({ queryKey: ['product-inventory-edit', editingProductId] })
-      queryClient.invalidateQueries({ queryKey: ['products-qty-map'] })
-      queryClient.invalidateQueries({ queryKey: ['products-locations-map'] })
       setNewLocId('')
       setNewLocQty('')
     },
-    onError: (err: any) => toast.error(err.message || '添加失败'),
+    onError: (err: any, _vars, ctx: any) => {
+      if (ctx) {
+        if (ctx.prevInv !== undefined) queryClient.setQueryData(ctx.invKey, ctx.prevInv)
+        if (ctx.prevQty !== undefined) queryClient.setQueryData(ctx.qtyKey, ctx.prevQty)
+        if (ctx.prevLoc !== undefined) queryClient.setQueryData(ctx.locMapKey, ctx.prevLoc)
+      }
+      toast.error(err.message || '添加失败')
+    },
   })
 
   const openCreate = () => {
@@ -585,6 +707,26 @@ export default function MobileProducts() {
     return product.tags.map((pt) => pt.tags).filter(Boolean)
   }
 
+  // 产品列表按库位顺序排列：先按仓库名/编码，再按库位编码
+  const sortedProducts = useMemo(() => {
+    if (!products) return products
+    return [...products].sort((a, b) => {
+      const aLocs = productLocationsMap?.get(a.id) || []
+      const bLocs = productLocationsMap?.get(b.id) || []
+      const aFirst = aLocs[0]
+      const bFirst = bLocs[0]
+      if (!aFirst && !bFirst) return 0
+      if (!aFirst) return 1
+      if (!bFirst) return -1
+      const aWh = aFirst.warehouseName || ''
+      const bWh = bFirst.warehouseName || ''
+      if (aWh !== bWh) return aWh.localeCompare(bWh, 'zh-CN')
+      const aCode = aFirst.code || ''
+      const bCode = bFirst.code || ''
+      return aCode.localeCompare(bCode, 'zh-CN', { numeric: true })
+    })
+  }, [products, productLocationsMap])
+
   return (
     <div className="flex flex-col h-full">
       {/* 顶部栏 */}
@@ -632,7 +774,7 @@ export default function MobileProducts() {
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
         {isLoading ? (
           <div className="text-center py-12 text-muted-foreground text-sm">加载中...</div>
-        ) : products?.length === 0 ? (
+        ) : sortedProducts?.length === 0 ? (
           <div className="text-center py-16">
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted mx-auto mb-3">
               <ImagePlus className="h-8 w-8 text-muted-foreground/50" />
@@ -646,7 +788,7 @@ export default function MobileProducts() {
             )}
           </div>
         ) : (
-          products?.map((p) => {
+          sortedProducts?.map((p) => {
             const productTags = getProductTags(p)
             const totalQty = productQtyMap?.get(p.id) || 0
             const isOutOfStock = totalQty === 0

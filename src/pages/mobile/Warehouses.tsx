@@ -339,19 +339,74 @@ export default function MobileWarehouses() {
     onError: (err: any) => toast.error(err.message || '删除失败'),
   })
 
-  // 从库位移除商品（删除 inventory 记录）
+  // 从库位移除商品（删除 inventory 记录）- 乐观更新
   const deleteInv = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('inventory').delete().eq('id', id)
       if (error) throw error
     },
+    onMutate: async (id: string) => {
+      const locsKey = ['locations', activeWh?.id] as const
+      await queryClient.cancelQueries({ queryKey: locsKey })
+      const prevLocs = queryClient.getQueryData<any[]>(locsKey)
+      let removed: { invId: string; productId: string | null; qty: number; locId: string } | null = null
+      if (prevLocs) {
+        outer: for (const l of prevLocs) {
+          const invs: any[] = l.inventory || []
+          for (const inv of invs) {
+            if (inv.id === id) {
+              removed = {
+                invId: id,
+                productId: inv.product?.id || null,
+                qty: Number(inv.quantity) || 0,
+                locId: l.id,
+              }
+              break outer
+            }
+          }
+        }
+      }
+      if (prevLocs && removed) {
+        const next = prevLocs.map((l) =>
+          l.id === removed!.locId
+            ? { ...l, inventory: (l.inventory || []).filter((inv: any) => inv.id !== id) }
+            : l,
+        )
+        queryClient.setQueryData(locsKey, next)
+      }
+      const qtyKey = ['products-qty-map'] as const
+      const prevQty = queryClient.getQueryData<Map<string, number>>(qtyKey)
+      if (removed && removed.productId && prevQty) {
+        const next = new Map(prevQty)
+        next.set(removed.productId, Math.max(0, (next.get(removed.productId) || 0) - removed.qty))
+        queryClient.setQueryData(qtyKey, next)
+      }
+      const locMapKey = ['products-locations-map'] as const
+      const prevLocMap = queryClient.getQueryData<Map<string, any[]>>(locMapKey)
+      if (removed && removed.productId && prevLocMap && prevLocs) {
+        const loc = prevLocs.find((l) => l.id === removed!.locId)
+        if (loc) {
+          const list = prevLocMap.get(removed.productId) || []
+          const next = list.filter((item: any) => item.code !== loc.code)
+          const newMap = new Map(prevLocMap)
+          newMap.set(removed.productId, next)
+          queryClient.setQueryData(locMapKey, newMap)
+        }
+      }
+      return { prevLocs, prevQty, prevLocMap, locsKey, qtyKey, locMapKey }
+    },
     onSuccess: () => {
       toast.success('已从库位移除')
-      queryClient.invalidateQueries({ queryKey: ['locations', activeWh?.id] })
-      queryClient.invalidateQueries({ queryKey: ['products-qty-map'] })
-      queryClient.invalidateQueries({ queryKey: ['products-locations-map'] })
+      queryClient.invalidateQueries({ queryKey: ['locations', activeWh?.id], refetchType: 'none' })
     },
-    onError: (err: any) => toast.error(err.message || '移除失败'),
+    onError: (err: any, _vars, ctx: any) => {
+      if (ctx) {
+        if (ctx.prevLocs !== undefined) queryClient.setQueryData(ctx.locsKey, ctx.prevLocs)
+        if (ctx.prevQty !== undefined) queryClient.setQueryData(ctx.qtyKey, ctx.prevQty)
+        if (ctx.prevLocMap !== undefined) queryClient.setQueryData(ctx.locMapKey, ctx.prevLocMap)
+      }
+      toast.error(err.message || '移除失败')
+    },
   })
 
   const openCreateWh = () => {
