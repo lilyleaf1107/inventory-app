@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react'
+import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -26,6 +26,8 @@ export default function MobileScan() {
   const [submitting, setSubmitting] = useState(false)
   const [showManualInput, setShowManualInput] = useState(false)
   const [manualBarcode, setManualBarcode] = useState('')
+  // 防止扫码识别产品后、摄像头停止前间隙重复触发
+  const productFoundRef = useRef(false)
 
   // 查询库存（出库模式用）
   const { data: inventoryList } = useQuery({
@@ -70,6 +72,8 @@ export default function MobileScan() {
 
   // 通过条形码或SKU查找产品
   const findProductByBarcode = useCallback(async (barcode: string) => {
+    // 已有产品时忽略后续扫码（防止摄像头停止前间隙重复触发）
+    if (productFoundRef.current) return
     try {
       // 先按条形码查，没查到再按 SKU 查
       let { data, error } = await supabase
@@ -90,6 +94,7 @@ export default function MobileScan() {
       }
 
       if (data) {
+        productFoundRef.current = true
         setProduct(data as Product)
         setLocationId('')
         setQuantity('')
@@ -115,6 +120,11 @@ export default function MobileScan() {
     start()
     return () => stop()
   }, [])
+
+  // 产品选中后立即停止摄像头，防止持续解码重复触发 toast
+  useEffect(() => {
+    if (product) stop()
+  }, [product, stop])
 
   // 入库模式：选中产品后，预设其最近使用的库位
   useEffect(() => {
@@ -179,6 +189,7 @@ export default function MobileScan() {
       queryClient.invalidateQueries({ queryKey: ['product-inventory'] })
       queryClient.invalidateQueries({ queryKey: ['mobile-stats'] })
       // 清空状态，准备下一次扫码
+      productFoundRef.current = false
       setProduct(null)
       setLocationId('')
       setQuantity('')
@@ -205,6 +216,7 @@ export default function MobileScan() {
         <button
           onClick={() => {
             setMode('in')
+            productFoundRef.current = false
             setProduct(null)
             setLocationId('')
           }}
@@ -218,6 +230,7 @@ export default function MobileScan() {
         <button
           onClick={() => {
             setMode('out')
+            productFoundRef.current = false
             setProduct(null)
             setLocationId('')
           }}
@@ -372,6 +385,7 @@ export default function MobileScan() {
                   variant="ghost"
                   size="icon"
                   onClick={() => {
+                    productFoundRef.current = false
                     setProduct(null)
                     setLocationId('')
                     setQuantity('')
