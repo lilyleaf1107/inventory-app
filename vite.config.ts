@@ -3,10 +3,15 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
 
+// GitHub Pages 部署时设置 DEPLOY_TARGET=github-pages
+const isGithubPages = process.env.DEPLOY_TARGET === 'github-pages'
+
 export default defineConfig({
+  base: isGithubPages ? '/inventory-app/' : '/',
   plugins: [
     react(),
     VitePWA({
+      disable: isGithubPages,
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg'],
       manifest: {
