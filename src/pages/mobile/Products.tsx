@@ -375,15 +375,43 @@ export default function MobileProducts() {
 
   const deleteMutation = useMutation({
     mutationFn: async (product: Product) => {
+      // 按外键依赖顺序清理：stock_moves → inventory → product_suppliers / product_tags → products
+      const { error: movesErr } = await supabase
+        .from('stock_moves')
+        .delete()
+        .eq('product_id', product.id)
+      if (movesErr) throw movesErr
+
+      const { error: invErr } = await supabase
+        .from('inventory')
+        .delete()
+        .eq('product_id', product.id)
+      if (invErr) throw invErr
+
+      const { error: psErr } = await supabase
+        .from('product_suppliers')
+        .delete()
+        .eq('product_id', product.id)
+      if (psErr) throw psErr
+
+      const { error: ptErr } = await supabase
+        .from('product_tags')
+        .delete()
+        .eq('product_id', product.id)
+      if (ptErr) throw ptErr
+
       if (product.image_path) {
         await deleteProductImage(product.image_path)
       }
+
       const { error } = await supabase.from('products').delete().eq('id', product.id)
       if (error) throw error
     },
     onSuccess: () => {
       toast.success('产品删除成功')
       queryClient.invalidateQueries({ queryKey: ['products'] })
+      queryClient.invalidateQueries({ queryKey: ['products-qty-map'] })
+      queryClient.invalidateQueries({ queryKey: ['products-locations-map'] })
     },
     onError: (err: any) => toast.error(err.message || '删除失败'),
   })
