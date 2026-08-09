@@ -202,45 +202,38 @@ function MobileHomeInner() {
   const { data: outOfStockCount = 0 } = useOutOfStockCount()
   const { data: lowStockCount = 0 } = useLowStockCountLight()
 
+  // 统一直接查表，避免 RPC 不存在/返回结构不一致时 totalQty 一直为 0
   const { data: stats } = useQuery({
     queryKey: ['mobile-stats-light'],
     queryFn: async () => {
       const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
       const [productRes, invRes, movesInRes, movesOutRes] = await Promise.all([
         supabase.from('products').select('*', { count: 'exact', head: true }),
-        supabase.rpc('get_inventory_total_qty'),
-        supabase.rpc('get_week_move_sum', { p_move_type: 'in', p_since: weekAgo }),
-        supabase.rpc('get_week_move_sum', { p_move_type: 'out', p_since: weekAgo }),
+        supabase.from('inventory').select('quantity'),
+        supabase
+          .from('stock_moves')
+          .select('quantity')
+          .eq('move_type', 'in')
+          .gte('created_at', weekAgo),
+        supabase
+          .from('stock_moves')
+          .select('quantity')
+          .eq('move_type', 'out')
+          .gte('created_at', weekAgo),
       ])
       return {
         productCount: productRes.count || 0,
-        totalQty: typeof invRes.data === 'number' ? invRes.data : 0,
-        weekIn: typeof movesInRes.data === 'number' ? movesInRes.data : 0,
-        weekOut: typeof movesOutRes.data === 'number' ? movesOutRes.data : 0,
+        totalQty: (invRes.data || []).reduce((s, i: any) => s + Number(i.quantity || 0), 0),
+        weekIn: (movesInRes.data || []).reduce((s, i: any) => s + Number(i.quantity || 0), 0),
+        weekOut: (movesOutRes.data || []).reduce((s, i: any) => s + Number(i.quantity || 0), 0),
       }
     },
     retry: 0,
     staleTime: 1000 * 60 * 2,
   })
 
-  const { data: fallbackStats } = useQuery({
-    queryKey: ['mobile-stats-fallback'],
-    queryFn: async () => {
-      const [productRes, invRes] = await Promise.all([
-        supabase.from('products').select('*', { count: 'exact', head: true }),
-        supabase.from('inventory').select('quantity').gt('quantity', 0),
-      ])
-      return {
-        productCount: productRes.count || 0,
-        totalQty: invRes.data?.reduce((s, i: any) => s + Number(i.quantity), 0) || 0,
-      }
-    },
-    enabled: !stats,
-    staleTime: 1000 * 60 * 2,
-  })
-
-  const productCount = stats?.productCount ?? fallbackStats?.productCount ?? 0
-  const totalQty = stats?.totalQty ?? fallbackStats?.totalQty ?? 0
+  const productCount = stats?.productCount ?? 0
+  const totalQty = stats?.totalQty ?? 0
   const weekIn = stats?.weekIn ?? 0
   const weekOut = stats?.weekOut ?? 0
 
