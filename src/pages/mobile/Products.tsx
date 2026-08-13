@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useDeferredValue } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -27,6 +27,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent } from '@/components/ui/card'
+import { LocationPicker } from '@/components/LocationPicker'
 import {
   Dialog,
   DialogContent,
@@ -92,6 +93,7 @@ export default function MobileProducts() {
   const queryClient = useQueryClient()
   const { canWrite, canViewCost } = useAuthStore()
   const [search, setSearch] = useState('')
+  const deferredSearch = useDeferredValue(search)
   const [categoryFilter, setCategoryFilter] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Product | null>(null)
@@ -100,6 +102,10 @@ export default function MobileProducts() {
   const [editingProductId, setEditingProductId] = useState<string | null>(null)
   const [newLocId, setNewLocId] = useState('')
   const [newLocQty, setNewLocQty] = useState('')
+  // 列表内联库位编辑
+  const [inlineLocProductId, setInlineLocProductId] = useState<string | null>(null)
+  const [inlineLocId, setInlineLocId] = useState('')
+  const [inlineLocQty, setInlineLocQty] = useState('')
 
   const { data: categories } = useQuery({
     queryKey: ['categories'],
@@ -156,13 +162,14 @@ export default function MobileProducts() {
           location:locations ( id, code, warehouse:warehouses ( code, name ) )
         `)
       if (error) throw error
-      const map = new Map<string, { code: string; warehouseName: string | null; quantity: number }[]>()
+      const map = new Map<string, { id: string; code: string; warehouseName: string | null; quantity: number }[]>()
       for (const row of (data || []) as any[]) {
         const pid = row.product_id as string
         const loc = row.location
         if (!loc) continue
         const list = map.get(pid) || []
         list.push({
+          id: loc.id,
           code: loc.code,
           warehouseName: loc.warehouse?.name || loc.warehouse?.code || null,
           quantity: Number(row.quantity) || 0,
@@ -192,10 +199,9 @@ export default function MobileProducts() {
     },
   })
 
-  // 所有库位（用于添加库位选择）
+  // 所有库位（列表内联编辑 + 编辑弹窗共用，长缓存）
   const { data: allLocations } = useQuery({
     queryKey: ['all-locations-for-select'],
-    enabled: !!editingProductId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('locations')
@@ -207,10 +213,11 @@ export default function MobileProducts() {
       if (error) throw error
       return data as any[]
     },
+    staleTime: 5 * 60 * 1000,
   })
 
   const { data: products, isLoading } = useQuery({
-    queryKey: ['products', search, categoryFilter],
+    queryKey: ['products', deferredSearch, categoryFilter],
     queryFn: async () => {
       let query = supabase
         .from('products')
@@ -221,9 +228,9 @@ export default function MobileProducts() {
         `,
         )
         .order('created_at', { ascending: false })
-      if (search) {
+      if (deferredSearch) {
         query = query.or(
-          `name.ilike.%${search}%,sku.ilike.%${search}%,barcode.ilike.%${search}%,category.ilike.%${search}%`,
+          `name.ilike.%${deferredSearch}%,sku.ilike.%${deferredSearch}%,barcode.ilike.%${deferredSearch}%,category.ilike.%${deferredSearch}%`,
         )
       }
       if (categoryFilter) {
@@ -331,15 +338,42 @@ export default function MobileProducts() {
         if (insertTagError) throw insertTagError
       }
     },
+    onMutate: async (data) => {
+      const key = ['products', deferredSearch, categoryFilter] as const
+      await queryClient.cancelQueries({ queryKey: key })
+      const prev = queryClient.getQueryData<ProductWithTags[]>(key)
+      queryClient.setQueryData(key, (old: ProductWithTags[] | undefined) => {
+        if (!old) return old
+        return old.map((p) =>
+          p.id === data.id
+            ? {
+                ...p,
+                sku: data.form.sku || null,
+                name: data.form.name,
+                barcode: data.form.barcode || null,
+                category: data.form.category || null,
+                spec: data.form.spec || null,
+                unit: data.form.unit,
+                cost: data.form.cost ? Number(data.form.cost) : null,
+                description: data.form.description || null,
+              }
+            : p,
+        )
+      })
+      return { prev, key }
+    },
     onSuccess: () => {
       toast.success('产品更新成功')
-      queryClient.invalidateQueries({ queryKey: ['products'] })
+      // 不再全量 invalidate products，乐观更新已同步缓存
       setDialogOpen(false)
       setEditing(null)
       setEditingProductId(null)
       setForm(emptyForm)
     },
-    onError: (err: any) => toast.error(err.message || '更新失败'),
+    onError: (err: any, _vars, ctx: any) => {
+      if (ctx) queryClient.setQueryData(ctx.key, ctx.prev)
+      toast.error(err.message || '更新失败')
+    },
   })
 
   const toggleShelfMutation = useMutation({
@@ -352,9 +386,9 @@ export default function MobileProducts() {
     },
     onMutate: async ({ id, value }) => {
       await queryClient.cancelQueries({ queryKey: ['products'] })
-      const previousData = queryClient.getQueryData(['products', search, categoryFilter])
+      const previousData = queryClient.getQueryData(['products', deferredSearch, categoryFilter])
       queryClient.setQueryData(
-        ['products', search, categoryFilter],
+        ['products', deferredSearch, categoryFilter],
         (old: ProductWithTags[] | undefined) => {
           if (!old) return old
           return old.map((p) => (p.id === id ? { ...p, on_shelf: value } : p))
@@ -365,7 +399,7 @@ export default function MobileProducts() {
     onError: (_err: any, _vars, context: any) => {
       if (context?.previousData) {
         queryClient.setQueryData(
-          ['products', search, categoryFilter],
+          ['products', deferredSearch, categoryFilter],
           context.previousData,
         )
       }
@@ -375,7 +409,7 @@ export default function MobileProducts() {
 
   const deleteMutation = useMutation({
     mutationFn: async (product: Product) => {
-      // 按外键依赖顺序清理：stock_moves → inventory → product_suppliers / product_tags → products
+      // 按外键依赖顺序清理：stock_moves → inventory → product_tags → products
       const { error: movesErr } = await supabase
         .from('stock_moves')
         .delete()
@@ -387,12 +421,6 @@ export default function MobileProducts() {
         .delete()
         .eq('product_id', product.id)
       if (invErr) throw invErr
-
-      const { error: psErr } = await supabase
-        .from('product_suppliers')
-        .delete()
-        .eq('product_id', product.id)
-      if (psErr) throw psErr
 
       const { error: ptErr } = await supabase
         .from('product_tags')
@@ -535,13 +563,13 @@ export default function MobileProducts() {
     },
   })
 
-  // 添加新库位库存 - 乐观更新
+  // 添加新库位库存 - 乐观更新（支持列表内联和编辑弹窗两种场景）
   const addInv = useMutation({
-    mutationFn: async ({ locationId, quantity }: { locationId: string; quantity: number }) => {
+    mutationFn: async ({ productId, locationId, quantity }: { productId: string; locationId: string; quantity: number }) => {
       const { data, error } = await supabase
         .from('inventory')
         .insert({
-          product_id: editingProductId,
+          product_id: productId,
           location_id: locationId,
           quantity,
         })
@@ -553,8 +581,8 @@ export default function MobileProducts() {
       if (error) throw error
       return data
     },
-    onMutate: async ({ locationId, quantity }) => {
-      const invKey = ['product-inventory-edit', editingProductId] as const
+    onMutate: async ({ productId, locationId, quantity }) => {
+      const invKey = ['product-inventory-edit', productId] as const
       const locsKey = ['all-locations-for-select'] as const
       await queryClient.cancelQueries({ queryKey: invKey })
       const prevInv = queryClient.getQueryData<any[]>(invKey)
@@ -570,34 +598,42 @@ export default function MobileProducts() {
       }
       const qtyKey = ['products-qty-map'] as const
       const prevQty = queryClient.getQueryData<Map<string, number>>(qtyKey)
-      if (prevQty && editingProductId) {
+      if (prevQty && productId) {
         const next = new Map(prevQty)
-        next.set(editingProductId, (next.get(editingProductId) || 0) + Number(quantity || 0))
+        next.set(productId, (next.get(productId) || 0) + Number(quantity || 0))
         queryClient.setQueryData(qtyKey, next)
       }
       const locMapKey = ['products-locations-map'] as const
       const prevLoc = queryClient.getQueryData<Map<string, any[]>>(locMapKey)
-      if (selLoc && prevLoc && editingProductId) {
-        const list = prevLoc.get(editingProductId) || []
+      if (selLoc && prevLoc && productId) {
+        const list = prevLoc.get(productId) || []
         const next = [
           ...list,
           {
+            id: selLoc.id,
             code: selLoc.code,
             warehouseName: selLoc.warehouse?.name || selLoc.warehouse?.code || null,
             quantity: Number(quantity) || 0,
           },
         ]
         const newMap = new Map(prevLoc)
-        newMap.set(editingProductId, next)
+        newMap.set(productId, next)
         queryClient.setQueryData(locMapKey, newMap)
       }
-      return { prevInv, prevQty, prevLoc, invKey, qtyKey, locMapKey }
+      return { prevInv, prevQty, prevLoc, invKey, qtyKey, locMapKey, productId }
     },
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       toast.success('已添加库位')
-      queryClient.invalidateQueries({ queryKey: ['product-inventory-edit', editingProductId] })
-      setNewLocId('')
-      setNewLocQty('')
+      queryClient.invalidateQueries({ queryKey: ['product-inventory-edit', vars.productId] })
+      if (vars.productId === editingProductId) {
+        setNewLocId('')
+        setNewLocQty('')
+      }
+      if (vars.productId === inlineLocProductId) {
+        setInlineLocId('')
+        setInlineLocQty('')
+        setInlineLocProductId(null)
+      }
     },
     onError: (err: any, _vars, ctx: any) => {
       if (ctx) {
@@ -937,6 +973,65 @@ export default function MobileProducts() {
                           ))}
                         </div>
                       )}
+                      {canWrite() && inlineLocProductId === p.id ? (
+                        <div className="mt-2 flex items-center gap-1">
+                          <LocationPicker
+                            locations={allLocations || []}
+                            excludeIds={locations.map((l: any) => l.id)}
+                            onSelect={(locId) => setInlineLocId(locId)}
+                            placeholder="搜索库位..."
+                            className="flex-1"
+                          />
+                          <input
+                            type="number"
+                            value={inlineLocQty}
+                            onChange={(e) => setInlineLocQty(e.target.value)}
+                            placeholder="数量"
+                            className="w-16 h-7 rounded-md border border-input bg-background px-1 text-xs"
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="h-7 px-2"
+                            disabled={!inlineLocId || !inlineLocQty}
+                            onClick={() => {
+                              addInv.mutate({
+                                productId: p.id,
+                                locationId: inlineLocId,
+                                quantity: Number(inlineLocQty),
+                              })
+                            }}
+                          >
+                            确认
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2"
+                            onClick={() => {
+                              setInlineLocProductId(null)
+                              setInlineLocId('')
+                              setInlineLocQty('')
+                            }}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      ) : canWrite() ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInlineLocProductId(p.id)
+                            setInlineLocId('')
+                            setInlineLocQty('')
+                          }}
+                          className="flex items-center gap-0.5 text-xs text-primary hover:text-primary/80 transition-colors mt-1"
+                        >
+                          <Plus className="h-3 w-3" />
+                          添加库位
+                        </button>
+                      ) : null}
                       {p.spec && (
                         <div className="text-xs text-muted-foreground mt-1">规格: {p.spec}</div>
                       )}
@@ -1224,7 +1319,9 @@ export default function MobileProducts() {
                       className="h-7 px-2 text-xs flex-shrink-0"
                       disabled={!newLocId || !newLocQty}
                       onClick={() => {
-                        addInv.mutate({ locationId: newLocId, quantity: Number(newLocQty) })
+                        if (editingProductId) {
+                          addInv.mutate({ productId: editingProductId, locationId: newLocId, quantity: Number(newLocQty) })
+                        }
                       }}
                     >
                       添加
