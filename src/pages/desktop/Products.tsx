@@ -655,14 +655,34 @@ export default function ProductsPage() {
     e.preventDefault()
     setSubmitting(true)
     try {
+      // SKU 归一化：空字符串 / 全空白统一为 null，避免 '' 被 Postgres unique 当成冲突
+      const normalizedSku = form.sku.trim() || null
+
+      // 唯一性校验（编辑场景排除自身）
+      if (normalizedSku) {
+        const { data: dup, error: dupErr } = await supabase
+          .from('products')
+          .select('id, name')
+          .eq('sku', normalizedSku)
+          .limit(2)
+        if (dupErr) throw dupErr
+        const other = dup?.filter((p) => p.id !== editing?.id) || []
+        if (other.length > 0) {
+          toast.error(`SKU「${normalizedSku}」已被产品「${other[0].name}」占用，请更换`)
+          return
+        }
+      }
+
+      const safeForm = { ...form, sku: normalizedSku ? normalizedSku : '' }
+
       if (editing) {
         await updateMutation.mutateAsync({
           id: editing.id,
-          form,
+          form: safeForm,
           oldImagePath: editing.image_path,
         })
       } else {
-        await createMutation.mutateAsync(form)
+        await createMutation.mutateAsync(safeForm)
       }
     } finally {
       setSubmitting(false)
