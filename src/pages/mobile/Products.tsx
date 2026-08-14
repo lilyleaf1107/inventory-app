@@ -1,5 +1,5 @@
-import { useState, useMemo, useDeferredValue } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useMemo, useDeferredValue, useEffect } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -90,6 +90,7 @@ interface ProductWithTags extends Product {
 
 export default function MobileProducts() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const { canWrite, canViewCost } = useAuthStore()
   const [search, setSearch] = useState('')
@@ -102,6 +103,9 @@ export default function MobileProducts() {
   const [editingProductId, setEditingProductId] = useState<string | null>(null)
   const [newLocId, setNewLocId] = useState('')
   const [newLocQty, setNewLocQty] = useState('')
+  // 新增产品时的初始库位
+  const [createLocId, setCreateLocId] = useState('')
+  const [createLocQty, setCreateLocQty] = useState('')
   // 列表内联库位编辑
   const [inlineLocProductId, setInlineLocProductId] = useState<string | null>(null)
   const [inlineLocId, setInlineLocId] = useState('')
@@ -279,12 +283,17 @@ export default function MobileProducts() {
           )
         if (tagError) throw tagError
       }
+      return product
     },
     onSuccess: () => {
       toast.success('产品创建成功')
       queryClient.invalidateQueries({ queryKey: ['products'] })
+      queryClient.invalidateQueries({ queryKey: ['products-qty-map'] })
+      queryClient.invalidateQueries({ queryKey: ['products-locations-map'] })
       setDialogOpen(false)
       setEditingProductId(null)
+      setCreateLocId('')
+      setCreateLocQty('')
       setForm(emptyForm)
     },
     onError: (err: any) => toast.error(err.message || '创建失败'),
@@ -650,6 +659,8 @@ export default function MobileProducts() {
     setEditingProductId(null)
     setNewLocId('')
     setNewLocQty('')
+    setCreateLocId('')
+    setCreateLocQty('')
     setForm(emptyForm)
     setDialogOpen(true)
   }
@@ -690,6 +701,21 @@ export default function MobileProducts() {
     setDialogOpen(true)
   }
 
+  // 支持 URL ?open=<product_id> 自动打开编辑（由仓库管理页跳转触发）
+  useEffect(() => {
+    const openId = searchParams.get('open')
+    if (!openId || !products) return
+    const product = products.find((p) => p.id === openId)
+    if (product) {
+      setSearchParams((prev) => {
+        const n = new URLSearchParams(prev)
+        n.delete('open')
+        return n
+      })
+      openEdit(product as Product)
+    }
+  }, [searchParams, products])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
@@ -721,7 +747,18 @@ export default function MobileProducts() {
           oldImagePath: editing.image_path,
         })
       } else {
-        await createMutation.mutateAsync(safeForm)
+        const created: any = await createMutation.mutateAsync(safeForm)
+        if (createLocId && createLocQty) {
+          const qty = Number(createLocQty)
+          if (qty > 0) {
+            const { error: invErr } = await supabase.from('inventory').insert({
+              product_id: created.id,
+              location_id: createLocId,
+              quantity: qty,
+            })
+            if (invErr) throw invErr
+          }
+        }
       }
     } finally {
       setSubmitting(false)
@@ -1232,6 +1269,34 @@ export default function MobileProducts() {
                   </Button>
                 </div>
               </div>
+
+              {!editing && (
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-1">
+                    <MapPin className="h-3.5 w-3.5" />
+                    初始库位
+                    <span className="text-xs text-muted-foreground font-normal">（选填）</span>
+                  </Label>
+                  <div className="space-y-2">
+                    <LocationPicker
+                      locations={allLocations || []}
+                      onSelect={(locId) => setCreateLocId(locId)}
+                      placeholder="搜索库位编码 / 仓库名..."
+                    />
+                    {createLocId && (
+                      <div className="text-xs text-muted-foreground">
+                        已选库位: {allLocations?.find((l) => l.id === createLocId)?.code}
+                      </div>
+                    )}
+                    <Input
+                      type="number"
+                      value={createLocQty}
+                      onChange={(e) => setCreateLocQty(e.target.value)}
+                      placeholder="数量"
+                    />
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label htmlFor="m-desc">描述</Label>

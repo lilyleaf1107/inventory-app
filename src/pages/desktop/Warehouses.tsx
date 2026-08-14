@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Plus, Edit2, Trash2, MapPin, Pin, PinOff, ChevronLeft, ChevronRight, ChevronDown, Package, Layers, List, X } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { useAuthStore } from '@/store/auth'
 import type { Warehouse, Location } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -134,6 +136,8 @@ function groupByLevel(locs: any[]) {
 
 export default function WarehousesPage() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const { canWrite } = useAuthStore()
 
   const [whDialogOpen, setWhDialogOpen] = useState(false)
   const [editingWh, setEditingWh] = useState<Warehouse | null>(null)
@@ -150,6 +154,10 @@ export default function WarehousesPage() {
   const [collapsedZones, setCollapsedZones] = useState<Set<string>>(new Set())
   const [collapsedRacks, setCollapsedRacks] = useState<Set<string>>(new Set())
   const [collapsedLevels, setCollapsedLevels] = useState<Set<string>>(new Set())
+  // 库位中商品的编辑弹窗
+  const [invDialogOpen, setInvDialogOpen] = useState(false)
+  const [editingInv, setEditingInv] = useState<any>(null)
+  const [editingInvQty, setEditingInvQty] = useState('')
 
   const { data: warehouses, isLoading } = useQuery({
     queryKey: ['warehouses'],
@@ -403,6 +411,96 @@ export default function WarehousesPage() {
       toast.error(err.message || '移除失败')
     },
   })
+
+  // 修改库位中商品数量（含移动记录）
+  const updateInvQty = useMutation({
+    mutationFn: async ({ invId, newQty }: { invId: string; newQty: number }) => {
+      const { data: current, error: qErr } = await supabase
+        .from('inventory')
+        .select('id, quantity, product_id, location_id')
+        .eq('id', invId)
+        .single()
+      if (qErr) throw qErr
+      const delta = newQty - (current?.quantity || 0)
+      if (delta !== 0) {
+        const { data: profile } = await supabase.auth.getUser()
+        const user = profile.user
+        const { error: moveErr } = await supabase.from('stock_moves').insert({
+          product_id: current.product_id,
+          location_id: current.location_id,
+          move_type: delta > 0 ? 'in' : 'out',
+          quantity: Math.abs(delta),
+          reason: '手动调整',
+          operator_id: user?.id || null,
+        })
+        if (moveErr) throw moveErr
+      }
+      const { error } = await supabase
+        .from('inventory')
+        .update({ quantity: newQty, updated_at: new Date().toISOString() })
+        .eq('id', invId)
+      if (error) throw error
+    },
+    onMutate: async ({ invId, newQty }) => {
+      const locsKey = ['locations', activeWh?.id] as const
+      await queryClient.cancelQueries({ queryKey: locsKey })
+      const prevLocs = queryClient.getQueryData<any[]>(locsKey)
+      let productId: string | null = null
+      let locId: string | null = null
+      let oldQty = 0
+      if (prevLocs) {
+        outer: for (const l of prevLocs) {
+          for (const inv of l.inventory || []) {
+            if (inv.id === invId) {
+              productId = inv.product?.id || inv.product_id || null
+              locId = l.id
+              oldQty = Number(inv.quantity) || 0
+              break outer
+            }
+          }
+        }
+      }
+      if (prevLocs && locId) {
+        const next = prevLocs.map((l) =>
+          l.id === locId
+            ? {
+                ...l,
+                inventory: (l.inventory || []).map((inv: any) =>
+                  inv.id === invId ? { ...inv, quantity: newQty } : inv,
+                ),
+              }
+            : l,
+        )
+        queryClient.setQueryData(locsKey, next)
+      }
+      const qtyKey = ['products-qty-map'] as const
+      const prevQty = queryClient.getQueryData<Map<string, number>>(qtyKey)
+      if (productId && prevQty) {
+        const next = new Map(prevQty)
+        const base = next.get(productId) || 0
+        next.set(productId, Math.max(0, base - oldQty + newQty))
+        queryClient.setQueryData(qtyKey, next)
+      }
+      return { prevLocs, prevQty, locsKey, qtyKey, oldQty, newQty, productId }
+    },
+    onSuccess: () => {
+      toast.success('已更新数量')
+      queryClient.invalidateQueries({ queryKey: ['locations', activeWh?.id], refetchType: 'none' })
+    },
+    onError: (err: any, _vars, ctx: any) => {
+      if (ctx) {
+        if (ctx.prevLocs !== undefined) queryClient.setQueryData(ctx.locsKey, ctx.prevLocs)
+        if (ctx.prevQty !== undefined) queryClient.setQueryData(ctx.qtyKey, ctx.prevQty)
+      }
+      toast.error(err.message || '更新失败')
+    },
+  })
+
+  const openEditInv = (inv: any, loc: any) => {
+    setEditingInv({ ...inv, location: loc })
+    setEditingInvQty(String(inv.quantity ?? ''))
+    setInvDialogOpen(true)
+  }
 
   const openCreateWh = () => {
     setEditingWh(null)
@@ -798,22 +896,56 @@ export default function WarehousesPage() {
                               title={inv.product.name + (inv.product.sku ? ' · ' + inv.product.sku : '')}
                             >
                               <Package className="h-3 w-3 flex-shrink-0" />
-                              <span className="truncate">
-                                {inv.product.name}
-                              </span>
-                              <span className="font-semibold flex-shrink-0">×{inv.quantity}</span>
                               <button
                                 type="button"
-                                className="ml-0.5 flex-shrink-0 hover:text-destructive transition-colors"
+                                className="truncate text-left hover:underline hover:text-blue-900"
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  if (confirm(`确定从该库位移除「${inv.product.name}」吗？`)) {
-                                    deleteInv.mutate(inv.id)
-                                  }
+                                  canWrite() && openEditInv(inv, l)
                                 }}
+                                title={canWrite() ? '点击编辑数量或跳转编辑商品' : undefined}
                               >
-                                <X className="h-3 w-3" />
+                                {inv.product.name}
                               </button>
+                              <button
+                                type="button"
+                                className="font-semibold flex-shrink-0 hover:underline hover:text-blue-900"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  canWrite() && openEditInv(inv, l)
+                                }}
+                                title={canWrite() ? '点击编辑数量' : undefined}
+                              >
+                                ×{inv.quantity}
+                              </button>
+                              {canWrite() && (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="flex-shrink-0 hover:text-foreground transition-colors"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      navigate(`/products?open=${inv.product.id}`)
+                                    }}
+                                    title="编辑产品信息（图片/规格/价格等）"
+                                  >
+                                    <Edit2 className="h-3 w-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="flex-shrink-0 hover:text-destructive transition-colors"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      if (confirm(`确定从该库位移除「${inv.product.name}」吗？`)) {
+                                        deleteInv.mutate(inv.id)
+                                      }
+                                    }}
+                                    title="从该库位移除"
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </button>
+                                </>
+                              )}
                             </span>
                           ))}
                         </div>
@@ -984,24 +1116,54 @@ export default function WarehousesPage() {
                                                                     }
                                                                   >
                                                                     <Package className="h-3 w-3 flex-shrink-0" />
-                                                                    <span className="truncate">
-                                                                      {inv.product.name}
-                                                                    </span>
-                                                                    <span className="font-semibold flex-shrink-0">
-                                                                      ×{inv.quantity}
-                                                                    </span>
                                                                     <button
                                                                       type="button"
-                                                                      className="ml-0.5 flex-shrink-0 hover:text-destructive transition-colors"
+                                                                      className="truncate text-left hover:underline hover:text-blue-900"
                                                                       onClick={(e) => {
                                                                         e.stopPropagation()
-                                                                        if (confirm(`确定从该库位移除「${inv.product.name}」吗？`)) {
-                                                                          deleteInv.mutate(inv.id)
-                                                                        }
+                                                                        canWrite() && openEditInv(inv, l)
                                                                       }}
                                                                     >
-                                                                      <X className="h-3 w-3" />
+                                                                      {inv.product.name}
                                                                     </button>
+                                                                    <button
+                                                                      type="button"
+                                                                      className="font-semibold flex-shrink-0 hover:underline hover:text-blue-900"
+                                                                      onClick={(e) => {
+                                                                        e.stopPropagation()
+                                                                        canWrite() && openEditInv(inv, l)
+                                                                      }}
+                                                                    >
+                                                                      ×{inv.quantity}
+                                                                    </button>
+                                                                    {canWrite() && (
+                                                                      <>
+                                                                        <button
+                                                                          type="button"
+                                                                          className="flex-shrink-0 hover:text-foreground transition-colors"
+                                                                          onClick={(e) => {
+                                                                            e.stopPropagation()
+                                                                            navigate(`/products?open=${inv.product.id}`)
+                                                                          }}
+                                                                          title="编辑产品信息"
+                                                                        >
+                                                                          <Edit2 className="h-2.5 w-2.5" />
+                                                                        </button>
+                                                                        <button
+                                                                          type="button"
+                                                                          className="flex-shrink-0 hover:text-destructive transition-colors"
+                                                                          onClick={(e) => {
+                                                                            e.stopPropagation()
+                                                                            if (confirm(`确定从该库位移除「${inv.product.name}」吗？`)) {
+                                                                              deleteInv.mutate(inv.id)
+                                                                            }
+                                                                          }}
+                                                                          title="从该库位移除"
+                                                                        >
+                                                                          <X className="h-3 w-3" />
+                                                                        </button>
+                                                                      </>
+                                                                    )}
                                                                   </span>
                                                                 ))}
                                                               </div>
@@ -1208,6 +1370,70 @@ export default function WarehousesPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* 编辑库位中商品 */}
+      <Dialog open={invDialogOpen} onOpenChange={(o) => !o && setInvDialogOpen(false)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>编辑库位商品</DialogTitle>
+            <DialogDescription>
+              {editingInv?.product?.name}
+              {editingInv?.location?.code && (
+                <span className="ml-2 text-xs font-mono text-muted-foreground">
+                  库位 {editingInv.location.code}
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>当前数量</Label>
+              <Input
+                type="number"
+                value={editingInvQty}
+                onChange={(e) => setEditingInvQty(e.target.value)}
+              />
+            </div>
+            <div className="text-xs text-muted-foreground">
+              保存时会自动生成一笔出入库流水（原因：手动调整）。
+            </div>
+          </div>
+          <DialogFooter className="sm:justify-between">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                if (!editingInv?.product?.id) return
+                navigate(`/products?open=${editingInv.product.id}`)
+                setInvDialogOpen(false)
+              }}
+            >
+              <Edit2 className="h-4 w-4 mr-1" />
+              编辑产品信息
+            </Button>
+            <div className="flex gap-2">
+              <Button type="button" variant="ghost" onClick={() => setInvDialogOpen(false)}>
+                取消
+              </Button>
+              <Button
+                type="button"
+                disabled={!editingInv?.id || editingInvQty === '' || Number(editingInvQty) < 0}
+                onClick={() => {
+                  if (!editingInv?.id) return
+                  updateInvQty.mutate(
+                    { invId: editingInv.id, newQty: Number(editingInvQty) },
+                    {
+                      onSuccess: () => setInvDialogOpen(false),
+                    },
+                  )
+                }}
+              >
+                保存
+              </Button>
+            </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
