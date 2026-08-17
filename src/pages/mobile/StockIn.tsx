@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -10,6 +10,7 @@ import {
   ScanLine,
   Camera,
   X,
+  MapPin,
 } from 'lucide-react'
 import { supabase, getProductImageUrl } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
@@ -37,6 +38,7 @@ export default function MobileStockIn() {
   const [remark, setRemark] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [scanMode, setScanMode] = useState(false)
+  const [locSearch, setLocSearch] = useState('')
 
   const findProductByBarcode = useCallback(async (barcode: string) => {
     try {
@@ -80,6 +82,39 @@ export default function MobileStockIn() {
       return data as Location[]
     },
   })
+
+  // 查询该产品在所有库位的现有库存
+  const { data: productStocks } = useQuery({
+    queryKey: ['product-stock-locs', product?.id],
+    enabled: !!product,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('inventory')
+        .select('location_id, quantity')
+        .eq('product_id', product!.id)
+        .gt('quantity', 0)
+      if (error) throw error
+      return data as { location_id: string; quantity: number }[]
+    },
+  })
+
+  // 库位列表按搜索词过滤
+  const filteredLocations = useMemo(() => {
+    if (!locations) return []
+    const kwl = locSearch.trim().toLowerCase()
+    if (!kwl) return locations
+    return locations.filter(
+      (l) =>
+        l.code.toLowerCase().includes(kwl) ||
+        (l.description && l.description.toLowerCase().includes(kwl)),
+    )
+  }, [locations, locSearch])
+
+  // 当前选中的库位对象
+  const selectedLocation = useMemo(
+    () => locations?.find((l) => l.id === locationId) || null,
+    [locations, locationId],
+  )
 
   // 预填：默认选中置顶/第一个仓库
   useEffect(() => {
@@ -272,22 +307,75 @@ export default function MobileStockIn() {
             {/* 库位 */}
             <div className="space-y-2">
               <Label htmlFor="m-loc">库位 *</Label>
-              <select
-                id="m-loc"
-                value={locationId}
-                onChange={(e) => setLocationId(e.target.value)}
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                disabled={!warehouseId}
-                required
-              >
-                <option value="">请选择库位</option>
-                {locations?.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.code}
-                    {l.description && ` · ${l.description}`}
-                  </option>
-                ))}
-              </select>
+              {selectedLocation ? (
+                <div className="flex items-center gap-2 px-3 py-2.5 rounded-md border border-green-300 bg-green-50 text-sm">
+                  <MapPin className="h-4 w-4 text-green-600 flex-shrink-0" />
+                  <span className="font-medium text-green-800">{selectedLocation.code}</span>
+                  {selectedLocation.description && (
+                    <span className="text-green-600 text-xs truncate">
+                      · {selectedLocation.description}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setLocationId('')}
+                    className="ml-auto text-green-600 hover:text-green-800 flex-shrink-0"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <Input
+                    id="m-loc"
+                    placeholder="搜索库位编码或描述..."
+                    value={locSearch}
+                    onChange={(e) => setLocSearch(e.target.value)}
+                    disabled={!warehouseId}
+                    className="disabled:opacity-50"
+                  />
+                  {filteredLocations.length > 0 && (
+                    <div className="max-h-40 overflow-y-auto rounded-md border border-input divide-y">
+                      {filteredLocations.map((l) => {
+                        const stock = productStocks?.find((s) => s.location_id === l.id)
+                        return (
+                          <button
+                            key={l.id}
+                            type="button"
+                            onClick={() => {
+                              setLocationId(l.id)
+                              setLocSearch('')
+                            }}
+                            className={`flex w-full items-center justify-between px-3 py-2.5 text-sm hover:bg-accent transition-colors ${
+                              stock ? 'bg-blue-50/50' : ''
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <MapPin className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                              <span className="font-medium">{l.code}</span>
+                              {l.description && (
+                                <span className="text-xs text-muted-foreground truncate">
+                                  {l.description}
+                                </span>
+                              )}
+                            </div>
+                            {stock && (
+                              <span className="text-xs text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded flex-shrink-0">
+                                现有 {stock.quantity}
+                              </span>
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                  {warehouseId && filteredLocations.length === 0 && (
+                    <p className="text-xs text-muted-foreground text-center py-2">
+                      {locSearch ? '无匹配库位' : '该仓库暂无库位'}
+                    </p>
+                  )}
+                </>
+              )}
             </div>
 
             {/* 数量 */}
