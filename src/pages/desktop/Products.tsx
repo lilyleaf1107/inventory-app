@@ -2,7 +2,7 @@ import { useState, useMemo, useDeferredValue, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Search, Edit2, Trash2, ImagePlus, X, Tag, MapPin } from 'lucide-react'
+import { Plus, Search, Edit2, Trash2, ImagePlus, X, Tag, MapPin, Package } from 'lucide-react'
 import { supabase, getProductImageUrl, uploadProductImage, deleteProductImage } from '@/lib/supabase'
 import type { Product, Category as CategoryType, Tag as TagType } from '@/types'
 import { useAuthStore } from '@/store/auth'
@@ -98,6 +98,8 @@ export default function ProductsPage() {
   // 新增产品时的初始库位
   const [createLocId, setCreateLocId] = useState('')
   const [createLocQty, setCreateLocQty] = useState('')
+  // 新增产品时的暂未入仓数量（无库位）
+  const [createUnallocQty, setCreateUnallocQty] = useState('')
   // 列表内联库位编辑
   const [inlineLocProductId, setInlineLocProductId] = useState<string | null>(null)
   const [inlineLocId, setInlineLocId] = useState('')
@@ -129,37 +131,47 @@ export default function ProductsPage() {
   })
 
   // 每个产品的总库存汇总（按产品 id 聚合）
+  //  总库存 = inventory 聚合数量 + unallocated_quantity（暂未入仓部分）
   const { data: productQtyMap } = useQuery({
     queryKey: ['products-qty-map'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('inventory')
-        .select('product_id, quantity')
-      if (error) throw error
+      const [{ data: invData, error: invErr }, { data: prodData, error: prodErr }] = await Promise.all([
+        supabase.from('inventory').select('product_id, quantity'),
+        supabase.from('products').select('id, unallocated_quantity'),
+      ])
+      if (invErr) throw invErr
+      if (prodErr) throw prodErr
       const map = new Map<string, number>()
-      for (const row of data || []) {
+      for (const row of invData || []) {
         const qty = Number((row as any).quantity) || 0
         const pid = (row as any).product_id as string
         map.set(pid, (map.get(pid) || 0) + qty)
+      }
+      for (const row of prodData || []) {
+        const qty = Number((row as any).unallocated_quantity) || 0
+        const pid = (row as any).id as string
+        if (qty > 0) map.set(pid, (map.get(pid) || 0) + qty)
       }
       return map
     },
     staleTime: 30 * 1000,
   })
 
-  // 每个产品的库位明细（按产品 id 聚合，显示每个库位）
+  // 每个产品的库位明细（按产品 id 聚合，显示每个库位 + 暂未入仓）
   const { data: productLocationsMap } = useQuery({
     queryKey: ['products-locations-map'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('inventory')
-        .select(`
+      const [{ data: invData, error: invErr }, { data: prodData, error: prodErr }] = await Promise.all([
+        supabase.from('inventory').select(`
           product_id, quantity,
           location:locations ( id, code, warehouse:warehouses ( code, name ) )
-        `)
-      if (error) throw error
-      const map = new Map<string, { id: string; code: string; warehouseName: string | null; quantity: number }[]>()
-      for (const row of (data || []) as any[]) {
+        `),
+        supabase.from('products').select('id, unallocated_quantity').gt('unallocated_quantity', 0),
+      ])
+      if (invErr) throw invErr
+      if (prodErr) throw prodErr
+      const map = new Map<string, { id: string; code: string; warehouseName: string | null; quantity: number; isUnallocated?: boolean }[]>()
+      for (const row of (invData || []) as any[]) {
         const pid = row.product_id as string
         const loc = row.location
         if (!loc) continue
@@ -169,6 +181,21 @@ export default function ProductsPage() {
           code: loc.code,
           warehouseName: loc.warehouse?.name || loc.warehouse?.code || null,
           quantity: Number(row.quantity) || 0,
+        })
+        map.set(pid, list)
+      }
+      // 暂未入仓挂在库位列表最后，id 用 "unalloc"（仅前端渲染用，无真实库位）
+      for (const row of (prodData || []) as any[]) {
+        const qty = Number(row.unallocated_quantity) || 0
+        if (qty <= 0) continue
+        const pid = row.id as string
+        const list = map.get(pid) || []
+        list.push({
+          id: 'unalloc',
+          code: '暂未入仓',
+          warehouseName: null,
+          quantity: qty,
+          isUnallocated: true,
         })
         map.set(pid, list)
       }
@@ -240,7 +267,8 @@ export default function ProductsPage() {
   })
 
   const createMutation = useMutation({
-    mutationFn: async (data: ProductForm) => {
+    mutationFn: async (args: { form: ProductForm; unallocatedQty: number }) => {
+      const { form: data, unallocatedQty } = args
       let imagePath = null
       if (data.imageFile) {
         imagePath = await uploadProductImage(data.imageFile)
@@ -258,6 +286,7 @@ export default function ProductsPage() {
           image_path: imagePath,
           description: data.description || null,
           on_shelf: true,
+          unallocated_quantity: unallocatedQty > 0 ? unallocatedQty : 0,
         })
         .select()
         .single()
@@ -288,6 +317,7 @@ export default function ProductsPage() {
       setEditingProductId(null)
       setCreateLocId('')
       setCreateLocQty('')
+      setCreateUnallocQty('')
       setForm(emptyForm)
     },
     onError: (err: any) => toast.error(err.message || '创建失败'),
@@ -745,7 +775,11 @@ export default function ProductsPage() {
           oldImagePath: editing.image_path,
         })
       } else {
-        const created: any = await createMutation.mutateAsync(safeForm)
+        const unallocQty = Number(createUnallocQty) || 0
+        const created: any = await createMutation.mutateAsync({
+          form: safeForm,
+          unallocatedQty: unallocQty > 0 ? unallocQty : 0,
+        })
         if (createLocId && createLocQty) {
           const qty = Number(createLocQty)
           if (qty > 0) {
@@ -1039,13 +1073,34 @@ export default function ProductsPage() {
                           <span className="text-muted-foreground text-xs">-</span>
                         ) : (
                           locations.map((loc, idx) => (
-                            <div key={idx} className="flex items-center gap-1 text-xs">
-                              <MapPin className="h-3 w-3 text-muted-foreground" />
-                              <span className="font-mono">{loc.code}</span>
+                            <div
+                              key={idx}
+                              className={`flex items-center gap-1 text-xs px-1.5 py-0.5 rounded ${
+                                loc.isUnallocated ? 'bg-amber-50 border border-amber-200' : ''
+                              }`}
+                            >
+                              {loc.isUnallocated ? (
+                                <Package className="h-3 w-3 text-amber-600" />
+                              ) : (
+                                <MapPin className="h-3 w-3 text-muted-foreground" />
+                              )}
+                              <span
+                                className={`font-mono ${
+                                  loc.isUnallocated ? 'text-amber-700 font-medium' : ''
+                                }`}
+                              >
+                                {loc.code}
+                              </span>
                               {loc.warehouseName && (
                                 <span className="text-muted-foreground">({loc.warehouseName})</span>
                               )}
-                              <span className="text-muted-foreground">: {loc.quantity}</span>
+                              <span
+                                className={
+                                  loc.isUnallocated ? 'text-amber-700 font-medium' : 'text-muted-foreground'
+                                }
+                              >
+                                : {loc.quantity}
+                              </span>
                             </div>
                           ))
                         )}
@@ -1053,7 +1108,9 @@ export default function ProductsPage() {
                           <div className="flex items-center gap-1 mt-1">
                             <LocationPicker
                               locations={allLocations || []}
-                              excludeIds={locations.map((l: any) => l.id)}
+                              excludeIds={locations
+                                .filter((l: any) => !l.isUnallocated)
+                                .map((l: any) => l.id)}
                               onSelect={(locId) => setInlineLocId(locId)}
                               placeholder="搜索库位..."
                               className="flex-1 min-w-[120px]"
@@ -1272,31 +1329,57 @@ export default function ProductsPage() {
                 </div>
               </div>
               {!editing && (
-                <div className="md:col-span-2 space-y-2">
-                  <Label className="flex items-center gap-1">
-                    <MapPin className="h-3.5 w-3.5" />
-                    初始库位
-                    <span className="text-xs text-muted-foreground font-normal">（选填，可创建后再添加）</span>
-                  </Label>
-                  <div className="flex items-center gap-2">
-                    <LocationPicker
-                      locations={allLocations || []}
-                      onSelect={(locId) => setCreateLocId(locId)}
-                      placeholder="搜索库位编码 / 仓库名..."
-                      className="flex-1"
-                    />
-                    {createLocId && (
-                      <span className="text-xs text-muted-foreground whitespace-nowrap">
-                        已选: {allLocations?.find((l) => l.id === createLocId)?.code}
+                <div className="md:col-span-2 space-y-4">
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-1">
+                      <Package className="h-3.5 w-3.5" />
+                      暂未入仓数量
+                      <span className="text-xs text-muted-foreground font-normal">
+                        （可选：有数量但暂时没确定库位时填这里）
                       </span>
-                    )}
+                    </Label>
                     <Input
                       type="number"
-                      value={createLocQty}
-                      onChange={(e) => setCreateLocQty(e.target.value)}
-                      placeholder="数量"
-                      className="w-32"
+                      min="0"
+                      step="0.01"
+                      value={createUnallocQty}
+                      onChange={(e) => setCreateUnallocQty(e.target.value)}
+                      placeholder="例：100"
+                      className="max-w-xs"
                     />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-1">
+                      <MapPin className="h-3.5 w-3.5" />
+                      初始库位 + 数量
+                      <span className="text-xs text-muted-foreground font-normal">
+                        （可选：已知道具体放哪里时填）
+                      </span>
+                    </Label>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <LocationPicker
+                        locations={allLocations || []}
+                        onSelect={(locId) => setCreateLocId(locId)}
+                        placeholder="搜索库位编码 / 仓库名..."
+                        className="flex-1 min-w-64"
+                      />
+                      {createLocId && (
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">
+                          已选: {allLocations?.find((l) => l.id === createLocId)?.code}
+                        </span>
+                      )}
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={createLocQty}
+                        onChange={(e) => setCreateLocQty(e.target.value)}
+                        placeholder="数量"
+                        className="w-32"
+                        disabled={!createLocId}
+                      />
+                    </div>
                   </div>
                 </div>
               )}

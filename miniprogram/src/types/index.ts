@@ -5,6 +5,7 @@ export interface Profile {
   name: string | null
   role: UserRole
   created_at: string
+  wx_openid?: string | null
 }
 
 export interface Product {
@@ -21,7 +22,6 @@ export interface Product {
   is_material_area: boolean
   cost: number | null
   on_shelf: boolean
-  unallocated_quantity: number
   created_at: string
   updated_at: string
 }
@@ -83,16 +83,4 @@ export interface Category {
   parent_id: string | null
   sort_order: number
   created_at: string
-}
-
-export interface Tag {
-  id: string
-  name: string
-  color: string | null
-  created_at: string
-}
-
-export interface ProductTag {
-  product_id: string
-  tag_id: string
 }

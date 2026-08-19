@@ -101,12 +101,14 @@ export function getLowStockLevelColor(level: LowStockLevel): {
 }
 
 // 获取低库存商品列表（库存 > 0 且 ≤ 预警阈值）
+// 合并两部分：inventory 库位明细 + products.unallocated_quantity 暂未入仓虚拟项
 export function useLowStock() {
   return useQuery({
     queryKey: ['low-stock'],
     queryFn: async () => {
       const t = getThresholds()
-      const { data, error } = await supabase
+      // 1. 库位明细（inventory）
+      const { data: invData, error: invErr } = await supabase
         .from('inventory')
         .select(`
           id,
@@ -124,8 +126,55 @@ export function useLowStock() {
         .lte('quantity', t.warning)
         .order('quantity', { ascending: true })
 
-      if (error) throw error
-      return (data || []) as unknown as LowStockItem[]
+      if (invErr) throw invErr
+      const items = (invData || []) as unknown as LowStockItem[]
+
+      // 2. 暂未入仓（products.unallocated_quantity）命中阈值的产品，作为虚拟项补进列表
+      const { data: prodData, error: prodErr } = await supabase
+        .from('products')
+        .select('id, name, sku, barcode, image_path, unit, category, is_material_area, unallocated_quantity')
+        .gt('unallocated_quantity', 0)
+        .lte('unallocated_quantity', t.warning)
+
+      if (prodErr) throw prodErr
+
+      for (const p of (prodData || []) as any[]) {
+        const qty = Number(p.unallocated_quantity) || 0
+        if (qty <= 0) continue
+        items.push({
+          id: `unalloc-${p.id}`,
+          quantity: qty,
+          product: {
+            id: p.id,
+            name: p.name,
+            sku: p.sku,
+            barcode: p.barcode,
+            image_path: p.image_path,
+            unit: p.unit,
+            category: p.category,
+            is_material_area: !!p.is_material_area,
+          },
+          location: {
+            id: 'unalloc',
+            code: '暂未入仓',
+            warehouse: {
+              id: 'unalloc',
+              code: '',
+              name: null,
+            },
+          },
+        })
+      }
+
+      // 按数量升序（与原查询一致），数量相同则按库位名排序，暂未入仓放后面
+      items.sort((a, b) => {
+        if (a.quantity !== b.quantity) return a.quantity - b.quantity
+        const aIs = a.location.id === 'unalloc' ? 1 : 0
+        const bIs = b.location.id === 'unalloc' ? 1 : 0
+        return aIs - bIs
+      })
+
+      return items
     },
   })
 }
@@ -142,18 +191,30 @@ export function useLowStockCount() {
 }
 
 // 轻量版：仅用 count 查询获取总数（首页用，不拉完整数据）
+// 合并：inventory 命中 + products.unallocated_quantity 命中
 export function useLowStockCountLight() {
   const t = getThresholds()
   return useQuery({
     queryKey: ['low-stock-count', t.warning],
     queryFn: async () => {
-      const { count, error } = await supabase
-        .from('inventory')
-        .select('*', { count: 'exact', head: true })
-        .gt('quantity', 0)
-        .lte('quantity', t.warning)
-      if (error) throw error
-      return count || 0
+      const [
+        { count: invCount, error: invErr },
+        { count: prodCount, error: prodErr },
+      ] = await Promise.all([
+        supabase
+          .from('inventory')
+          .select('*', { count: 'exact', head: true })
+          .gt('quantity', 0)
+          .lte('quantity', t.warning),
+        supabase
+          .from('products')
+          .select('*', { count: 'exact', head: true })
+          .gt('unallocated_quantity', 0)
+          .lte('unallocated_quantity', t.warning),
+      ])
+      if (invErr) throw invErr
+      if (prodErr) throw prodErr
+      return (invCount || 0) + (prodCount || 0)
     },
     staleTime: 1000 * 60 * 2,
   })

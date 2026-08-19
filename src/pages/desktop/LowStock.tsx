@@ -133,8 +133,16 @@ export default function LowStockPage() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1 text-sm">
-                        <MapPin className="h-3 w-3 text-muted-foreground" />
-                        {item.location.warehouse.name || item.location.warehouse.code} · {item.location.code}
+                        {item.location.id === 'unalloc' ? (
+                          <Package className="h-3 w-3 text-amber-600" />
+                        ) : (
+                          <MapPin className="h-3 w-3 text-muted-foreground" />
+                        )}
+                        <span className={item.location.id === 'unalloc' ? 'text-amber-700 font-medium' : ''}>
+                          {item.location.id === 'unalloc'
+                            ? item.location.code
+                            : `${item.location.warehouse?.name || item.location.warehouse?.code || ''} · ${item.location.code}`}
+                        </span>
                       </div>
                     </TableCell>
                     <TableCell className={`font-bold ${color.text}`}>

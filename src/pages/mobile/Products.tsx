@@ -12,6 +12,7 @@ import {
   ArrowLeft,
   Tag,
   MapPin,
+  Package,
 } from 'lucide-react'
 import {
   supabase,
@@ -106,6 +107,8 @@ export default function MobileProducts() {
   // 新增产品时的初始库位
   const [createLocId, setCreateLocId] = useState('')
   const [createLocQty, setCreateLocQty] = useState('')
+  // 新增产品时的暂未入仓数量（无库位）
+  const [createUnallocQty, setCreateUnallocQty] = useState('')
   // 列表内联库位编辑
   const [inlineLocProductId, setInlineLocProductId] = useState<string | null>(null)
   const [inlineLocId, setInlineLocId] = useState('')
@@ -136,38 +139,47 @@ export default function MobileProducts() {
     },
   })
 
-  // 每个产品的总库存汇总
+  // 每个产品的总库存汇总（inventory + unallocated_quantity）
   const { data: productQtyMap } = useQuery({
     queryKey: ['products-qty-map'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('inventory')
-        .select('product_id, quantity')
-      if (error) throw error
+      const [{ data: invData, error: invErr }, { data: prodData, error: prodErr }] = await Promise.all([
+        supabase.from('inventory').select('product_id, quantity'),
+        supabase.from('products').select('id, unallocated_quantity'),
+      ])
+      if (invErr) throw invErr
+      if (prodErr) throw prodErr
       const map = new Map<string, number>()
-      for (const row of data || []) {
+      for (const row of invData || []) {
         const qty = Number((row as any).quantity) || 0
         const pid = (row as any).product_id as string
         map.set(pid, (map.get(pid) || 0) + qty)
+      }
+      for (const row of prodData || []) {
+        const qty = Number((row as any).unallocated_quantity) || 0
+        const pid = (row as any).id as string
+        if (qty > 0) map.set(pid, (map.get(pid) || 0) + qty)
       }
       return map
     },
     staleTime: 30 * 1000,
   })
 
-  // 每个产品的库位明细
+  // 每个产品的库位明细（含暂未入仓）
   const { data: productLocationsMap } = useQuery({
     queryKey: ['products-locations-map'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('inventory')
-        .select(`
+      const [{ data: invData, error: invErr }, { data: prodData, error: prodErr }] = await Promise.all([
+        supabase.from('inventory').select(`
           product_id, quantity,
           location:locations ( id, code, warehouse:warehouses ( code, name ) )
-        `)
-      if (error) throw error
-      const map = new Map<string, { id: string; code: string; warehouseName: string | null; quantity: number }[]>()
-      for (const row of (data || []) as any[]) {
+        `),
+        supabase.from('products').select('id, unallocated_quantity').gt('unallocated_quantity', 0),
+      ])
+      if (invErr) throw invErr
+      if (prodErr) throw prodErr
+      const map = new Map<string, { id: string; code: string; warehouseName: string | null; quantity: number; isUnallocated?: boolean }[]>()
+      for (const row of (invData || []) as any[]) {
         const pid = row.product_id as string
         const loc = row.location
         if (!loc) continue
@@ -177,6 +189,20 @@ export default function MobileProducts() {
           code: loc.code,
           warehouseName: loc.warehouse?.name || loc.warehouse?.code || null,
           quantity: Number(row.quantity) || 0,
+        })
+        map.set(pid, list)
+      }
+      for (const row of (prodData || []) as any[]) {
+        const qty = Number(row.unallocated_quantity) || 0
+        if (qty <= 0) continue
+        const pid = row.id as string
+        const list = map.get(pid) || []
+        list.push({
+          id: 'unalloc',
+          code: '暂未入仓',
+          warehouseName: null,
+          quantity: qty,
+          isUnallocated: true,
         })
         map.set(pid, list)
       }
@@ -247,7 +273,8 @@ export default function MobileProducts() {
   })
 
   const createMutation = useMutation({
-    mutationFn: async (data: ProductForm) => {
+    mutationFn: async (args: { form: ProductForm; unallocatedQty: number }) => {
+      const { form: data, unallocatedQty } = args
       let imagePath = null
       if (data.imageFile) {
         imagePath = await uploadProductImage(data.imageFile)
@@ -265,6 +292,7 @@ export default function MobileProducts() {
           image_path: imagePath,
           description: data.description || null,
           on_shelf: true,
+          unallocated_quantity: unallocatedQty > 0 ? unallocatedQty : 0,
         })
         .select()
         .single()
@@ -294,6 +322,7 @@ export default function MobileProducts() {
       setEditingProductId(null)
       setCreateLocId('')
       setCreateLocQty('')
+      setCreateUnallocQty('')
       setForm(emptyForm)
     },
     onError: (err: any) => toast.error(err.message || '创建失败'),
@@ -747,7 +776,11 @@ export default function MobileProducts() {
           oldImagePath: editing.image_path,
         })
       } else {
-        const created: any = await createMutation.mutateAsync(safeForm)
+        const unallocQty = Number(createUnallocQty) || 0
+        const created: any = await createMutation.mutateAsync({
+          form: safeForm,
+          unallocatedQty: unallocQty > 0 ? unallocQty : 0,
+        })
         if (createLocId && createLocQty) {
           const qty = Number(createLocQty)
           if (qty > 0) {
@@ -1001,20 +1034,44 @@ export default function MobileProducts() {
                       </div>
                       {locations.length > 0 && (
                         <div className="mt-1 flex flex-wrap gap-1 text-xs">
-                          {locations.map((loc, idx) => (
-                            <span key={idx} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-muted/60 text-muted-foreground">
-                              <MapPin className="h-2.5 w-2.5" />
-                              <span className="font-mono">{loc.code}</span>
-                              <span>: {loc.quantity}</span>
-                            </span>
-                          ))}
+                          {locations.map((loc, idx) => {
+                            const isUnalloc = (loc as any).isUnallocated
+                            return (
+                              <span
+                                key={idx}
+                                className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded ${
+                                  isUnalloc
+                                    ? 'bg-amber-50 border border-amber-200'
+                                    : 'bg-muted/60 text-muted-foreground'
+                                }`}
+                              >
+                                {isUnalloc ? (
+                                  <Package className="h-2.5 w-2.5 text-amber-600" />
+                                ) : (
+                                  <MapPin className="h-2.5 w-2.5" />
+                                )}
+                                <span
+                                  className={`font-mono ${
+                                    isUnalloc ? 'text-amber-700 font-medium' : ''
+                                  }`}
+                                >
+                                  {loc.code}
+                                </span>
+                                <span className={isUnalloc ? 'text-amber-700 font-medium' : ''}>
+                                  : {loc.quantity}
+                                </span>
+                              </span>
+                            )
+                          })}
                         </div>
                       )}
                       {canWrite() && inlineLocProductId === p.id ? (
                         <div className="mt-2 flex items-center gap-1">
                           <LocationPicker
                             locations={allLocations || []}
-                            excludeIds={locations.map((l: any) => l.id)}
+                            excludeIds={locations
+                              .filter((l: any) => !l.isUnallocated)
+                              .map((l: any) => l.id)}
                             onSelect={(locId) => setInlineLocId(locId)}
                             placeholder="搜索库位..."
                             className="flex-1"
@@ -1271,29 +1328,48 @@ export default function MobileProducts() {
               </div>
 
               {!editing && (
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-1">
-                    <MapPin className="h-3.5 w-3.5" />
-                    初始库位
-                    <span className="text-xs text-muted-foreground font-normal">（选填）</span>
-                  </Label>
+                <div className="space-y-4">
                   <div className="space-y-2">
-                    <LocationPicker
-                      locations={allLocations || []}
-                      onSelect={(locId) => setCreateLocId(locId)}
-                      placeholder="搜索库位编码 / 仓库名..."
-                    />
-                    {createLocId && (
-                      <div className="text-xs text-muted-foreground">
-                        已选库位: {allLocations?.find((l) => l.id === createLocId)?.code}
-                      </div>
-                    )}
+                    <Label className="flex items-center gap-1">
+                      <Package className="h-3.5 w-3.5" />
+                      暂未入仓数量
+                      <span className="text-xs text-muted-foreground font-normal">
+                        （可选：有数量但暂时没确定库位时填这里）
+                      </span>
+                    </Label>
                     <Input
                       type="number"
-                      value={createLocQty}
-                      onChange={(e) => setCreateLocQty(e.target.value)}
-                      placeholder="数量"
+                      min="0"
+                      step="0.01"
+                      value={createUnallocQty}
+                      onChange={(e) => setCreateUnallocQty(e.target.value)}
+                      placeholder="例：100"
                     />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-1">
+                      <MapPin className="h-3.5 w-3.5" />
+                      初始库位
+                      <span className="text-xs text-muted-foreground font-normal">（选填）</span>
+                    </Label>
+                    <div className="space-y-2">
+                      <LocationPicker
+                        locations={allLocations || []}
+                        onSelect={(locId) => setCreateLocId(locId)}
+                        placeholder="搜索库位编码 / 仓库名..."
+                      />
+                      {createLocId && (
+                        <div className="text-xs text-muted-foreground">
+                          已选库位: {allLocations?.find((l) => l.id === createLocId)?.code}
+                        </div>
+                      )}
+                      <Input
+                        type="number"
+                        value={createLocQty}
+                        onChange={(e) => setCreateLocQty(e.target.value)}
+                        placeholder="数量"
+                      />
+                    </div>
                   </div>
                 </div>
               )}

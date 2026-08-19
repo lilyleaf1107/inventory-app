@@ -1,0 +1,50 @@
+export default defineAppConfig({
+  pages: [
+    'pages/login/index',
+    'pages/home/index',
+    'pages/products/index',
+    'pages/warehouses/index',
+    'pages/stock-in/index',
+    'pages/stock-out/index',
+    'pages/inventory/index',
+    'pages/low-stock/index',
+    'pages/out-of-stock/index',
+    'pages/materials/index',
+    'pages/categories/index',
+    'pages/profile/index',
+  ],
+  window: {
+    backgroundTextStyle: 'light',
+    navigationBarBackgroundColor: '#ffffff',
+    navigationBarTitleText: '库存管理',
+    navigationBarTextStyle: 'black',
+  },
+  lazyCodeLoading: 'requiredComponents',
+  componentFramework: 'glass-easel',
+  tabBar: {
+    color: '#64756a',
+    selectedColor: '#5ea471',
+    backgroundColor: '#ffffff',
+    borderStyle: 'black',
+    list: [
+      {
+        pagePath: 'pages/home/index',
+        text: '首页',
+        iconPath: 'assets/tabbar/home.png',
+        selectedIconPath: 'assets/tabbar/home-active.png',
+      },
+      {
+        pagePath: 'pages/inventory/index',
+        text: '库存',
+        iconPath: 'assets/tabbar/inventory.png',
+        selectedIconPath: 'assets/tabbar/inventory-active.png',
+      },
+      {
+        pagePath: 'pages/profile/index',
+        text: '我的',
+        iconPath: 'assets/tabbar/profile.png',
+        selectedIconPath: 'assets/tabbar/profile-active.png',
+      },
+    ],
+  },
+})

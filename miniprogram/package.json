@@ -1,0 +1,34 @@
+{
+  "name": "inventory-miniprogram",
+  "private": true,
+  "version": "1.0.0",
+  "description": "库存管理小程序（Taro + React + TS）",
+  "scripts": {
+    "build:weapp": "taro build --type weapp",
+    "dev:weapp": "npm run build:weapp -- --watch"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "@tanstack/react-query": "^5.51.0",
+    "@tarojs/components": "3.6.27",
+    "@tarojs/helper": "3.6.27",
+    "@tarojs/plugin-framework-react": "3.6.27",
+    "@tarojs/plugin-platform-weapp": "3.6.27",
+    "@tarojs/react": "3.6.27",
+    "@tarojs/runtime": "3.6.27",
+    "@tarojs/shared": "3.6.27",
+    "@tarojs/taro": "3.6.27",
+    "react": "^18.3.1",
+    "zustand": "^4.5.4"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.0",
+    "@tarojs/cli": "3.6.27",
+    "@tarojs/webpack5-runner": "3.6.27",
+    "@types/react": "^18.3.3",
+    "@types/webpack-env": "^1.18.5",
+    "babel-preset-taro": "3.6.27",
+    "typescript": "^5.5.3",
+    "webpack": "5.93.0"
+  }
+}
