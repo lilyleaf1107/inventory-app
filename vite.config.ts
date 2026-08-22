@@ -1,33 +1,15 @@
-import { defineConfig, Plugin } from 'vite'
+import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
-import fs from 'fs'
 
 // GitHub Pages 部署时设置 DEPLOY_TARGET=github-pages
 const isGithubPages = process.env.DEPLOY_TARGET === 'github-pages'
-
-// GitHub Pages SPA 路由支持：生成 404.html（复制 index.html）+ .nojekyll
-function ghPages404Plugin(): Plugin | null {
-  if (!isGithubPages) return null
-  return {
-    name: 'gh-pages-404',
-    closeBundle() {
-      const distDir = path.resolve(__dirname, 'dist')
-      const indexHtml = path.join(distDir, 'index.html')
-      if (fs.existsSync(indexHtml)) {
-        fs.copyFileSync(indexHtml, path.join(distDir, '404.html'))
-        fs.writeFileSync(path.join(distDir, '.nojekyll'), '')
-      }
-    },
-  }
-}
 
 export default defineConfig({
   base: isGithubPages ? '/inventory-app/' : '/',
   plugins: [
     react(),
-    ghPages404Plugin(),
     VitePWA({
       disable: isGithubPages,
       registerType: 'autoUpdate',
