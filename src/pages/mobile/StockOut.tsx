@@ -40,6 +40,18 @@ export default function MobileStockOut() {
 
   const findProductByBarcode = useCallback(async (barcode: string) => {
     try {
+      // 1. 优先用本地缓存匹配，无网络往返直接定位
+      const cached = queryClient.getQueryData<Product[]>(['products', ''])
+      const localMatch = cached?.find((p) => p.barcode === barcode || p.sku === barcode)
+      if (localMatch) {
+        setProduct(localMatch)
+        setScanMode(true)
+        setLocationId('')
+        setQuantity('')
+        toast.success(`已识别：${localMatch.name}`)
+        return
+      }
+      // 2. 本地未命中，走网络精确查询
       const { data, error } = await supabase
         .from('products')
         .select('*')
@@ -58,7 +70,7 @@ export default function MobileStockOut() {
     } catch (err: any) {
       toast.error(err.message || '查询失败')
     }
-  }, [])
+  }, [queryClient])
 
   const { data: inventoryList, isLoading: invLoading } = useQuery({
     queryKey: ['product-inventory', product?.id],

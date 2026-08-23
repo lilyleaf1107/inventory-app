@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Search, ImagePlus, Check } from 'lucide-react'
 import { supabase, getProductImageUrl } from '@/lib/supabase'
@@ -21,8 +21,15 @@ interface ProductPickerProps {
 }
 
 export default function ProductPicker({ open, onOpenChange, onSelect }: ProductPickerProps) {
+  const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  // 250ms 防抖：减少输入时的网络请求频率，提升响应速度
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput), 250)
+    return () => clearTimeout(t)
+  }, [searchInput])
 
   const { data: products, isLoading } = useQuery({
     queryKey: ['products', search],
@@ -48,6 +55,7 @@ export default function ProductPicker({ open, onOpenChange, onSelect }: ProductP
     if (selected) {
       onSelect(selected)
       setSelectedId(null)
+      setSearchInput('')
       setSearch('')
       onOpenChange(false)
     }
@@ -55,6 +63,7 @@ export default function ProductPicker({ open, onOpenChange, onSelect }: ProductP
 
   const handleClose = () => {
     setSelectedId(null)
+    setSearchInput('')
     setSearch('')
     onOpenChange(false)
   }
@@ -71,8 +80,8 @@ export default function ProductPicker({ open, onOpenChange, onSelect }: ProductP
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="搜索名称 / SKU / 条形码"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
               className="pl-8"
               autoFocus
             />

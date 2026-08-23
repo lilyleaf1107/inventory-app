@@ -40,8 +40,19 @@ export default function MobileStockIn() {
   const [scanMode, setScanMode] = useState(false)
   const [locSearch, setLocSearch] = useState('')
 
+  // 通过条形码查找产品：优先从本地缓存匹配（无网络往返），未命中再走网络查询
   const findProductByBarcode = useCallback(async (barcode: string) => {
     try {
+      // 1. 优先用本地缓存匹配，无网络往返直接定位
+      const cached = queryClient.getQueryData<Product[]>(['products', ''])
+      const localMatch = cached?.find((p) => p.barcode === barcode || p.sku === barcode)
+      if (localMatch) {
+        setProduct(localMatch)
+        setScanMode(true)
+        toast.success(`已识别：${localMatch.name}`)
+        return
+      }
+      // 2. 本地未命中，走网络精确查询
       const { data, error } = await supabase
         .from('products')
         .select('*')
@@ -58,7 +69,7 @@ export default function MobileStockIn() {
     } catch (err: any) {
       toast.error(err.message || '查询失败')
     }
-  }, [])
+  }, [queryClient])
 
   const { data: warehouses } = useQuery({
     queryKey: ['warehouses'],
@@ -326,16 +337,19 @@ export default function MobileStockIn() {
                 </div>
               ) : (
                 <>
-                  <Input
-                    id="m-loc"
-                    placeholder="搜索库位编码或描述..."
-                    value={locSearch}
-                    onChange={(e) => setLocSearch(e.target.value)}
-                    disabled={!warehouseId}
-                    className="disabled:opacity-50"
-                  />
+                  <div className="relative">
+                    <MapPin className="absolute left-2.5 top-3 h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    <Input
+                      id="m-loc"
+                      placeholder="搜索库位编码或描述..."
+                      value={locSearch}
+                      onChange={(e) => setLocSearch(e.target.value)}
+                      disabled={!warehouseId}
+                      className="disabled:opacity-50 pl-8 h-11 border-primary/30 focus:border-primary"
+                    />
+                  </div>
                   {filteredLocations.length > 0 && (
-                    <div className="max-h-40 overflow-y-auto rounded-md border border-input divide-y">
+                    <div className="max-h-60 overflow-y-auto rounded-md border border-input divide-y">
                       {filteredLocations.map((l) => {
                         const stock = productStocks?.find((s) => s.location_id === l.id)
                         return (
@@ -346,7 +360,7 @@ export default function MobileStockIn() {
                               setLocationId(l.id)
                               setLocSearch('')
                             }}
-                            className={`flex w-full items-center justify-between px-3 py-2.5 text-sm hover:bg-accent transition-colors ${
+                            className={`flex w-full items-center justify-between px-3 py-3 text-sm hover:bg-accent transition-colors ${
                               stock ? 'bg-blue-50/50' : ''
                             }`}
                           >
@@ -360,7 +374,7 @@ export default function MobileStockIn() {
                               )}
                             </div>
                             {stock && (
-                              <span className="text-xs text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded flex-shrink-0">
+                              <span className="text-xs text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded flex-shrink-0">
                                 现有 {stock.quantity}
                               </span>
                             )}

@@ -45,10 +45,22 @@ export default function StockOutPage() {
   const [scanMode, setScanMode] = useState(false)
   const [searchingBarcode, setSearchingBarcode] = useState(false)
 
-  // 通过条形码查找产品
+  // 通过条形码查找产品：优先从本地缓存匹配（无网络往返），未命中再走网络查询
   const findProductByBarcode = useCallback(async (barcode: string) => {
     setSearchingBarcode(true)
     try {
+      // 1. 优先用本地缓存匹配，无网络往返直接定位
+      const cached = queryClient.getQueryData<Product[]>(['products', ''])
+      const localMatch = cached?.find((p) => p.barcode === barcode)
+      if (localMatch) {
+        setProduct(localMatch)
+        setScanMode(true)
+        setLocationId('')
+        setQuantity('')
+        toast.success(`已识别产品：${localMatch.name}`)
+        return
+      }
+      // 2. 本地未命中，走网络精确查询
       const { data, error } = await supabase
         .from('products')
         .select('*')
@@ -69,7 +81,7 @@ export default function StockOutPage() {
     } finally {
       setSearchingBarcode(false)
     }
-  }, [])
+  }, [queryClient])
 
   // 扫码枪监听（电脑端自动启用）
   useBarcodeGun({

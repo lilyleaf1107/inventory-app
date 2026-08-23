@@ -843,18 +843,18 @@ export default function WarehousesPage() {
                 暂无库位，点击右上角新增
               </div>
             ) : locViewMode === 'flat' ? (
-              <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
+              <div className="space-y-3 pr-1">
                 {locations?.map((l: any) => {
                   const occupied = (l.inventory || []).filter((inv: any) => inv.product)
                   return (
                   <div
                     key={l.id}
-                    className="flex items-center justify-between p-3 rounded-md border hover:border-primary/40 hover:bg-muted/20 transition-colors"
+                    className="flex items-center justify-between p-4 rounded-lg border hover:border-primary/40 hover:bg-muted/20 transition-colors"
                   >
                     <div className="flex items-center gap-4 min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-shrink-0">
                         {l.zone && (
-                          <span className="inline-flex items-center justify-center h-8 w-8 rounded-md bg-primary/10 text-primary text-sm font-bold">
+                          <span className="inline-flex items-center justify-center h-10 w-10 rounded-lg bg-primary/10 text-primary text-base font-bold">
                             {l.zone}
                           </span>
                         )}
@@ -883,7 +883,7 @@ export default function WarehousesPage() {
                         </div>
                       </div>
                       {l.description && l.code !== l.description && (
-                        <div className="text-xs text-muted-foreground flex-shrink-0">
+                        <div className="text-sm text-muted-foreground flex-shrink-0">
                           {l.description}
                         </div>
                       )}
@@ -892,10 +892,10 @@ export default function WarehousesPage() {
                           {occupied.map((inv: any) => (
                             <span
                               key={inv.id}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-700 border border-blue-200 truncate max-w-full"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs bg-blue-100 text-blue-800 border border-blue-300 truncate max-w-full"
                               title={inv.product.name + (inv.product.sku ? ' · ' + inv.product.sku : '')}
                             >
-                              <Package className="h-3 w-3 flex-shrink-0" />
+                              <Package className="h-3.5 w-3.5 flex-shrink-0" />
                               <button
                                 type="button"
                                 className="truncate text-left hover:underline hover:text-blue-900"
@@ -950,13 +950,13 @@ export default function WarehousesPage() {
                           ))}
                         </div>
                       ) : (
-                        <span className="text-[11px] text-muted-foreground italic ml-auto flex-shrink-0">
+                        <span className="text-xs text-muted-foreground italic ml-auto flex-shrink-0">
                           空库位
                         </span>
                       )}
                     </div>
                     <div className="flex items-center gap-3 flex-shrink-0 ml-3">
-                      <span className="font-mono text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
+                      <span className="font-mono text-sm font-medium text-foreground bg-muted px-2.5 py-1.5 rounded">
                         {l.code}
                       </span>
                       <div className="flex gap-0.5">
@@ -1334,10 +1334,10 @@ export default function WarehousesPage() {
                   <Label>位次 *</Label>
                   <Input
                     value={locForm.position}
-                    onChange={(e) => setLocForm({ ...locForm, position: e.target.value.replace(/[^0-9]/g, '') })}
+                    onChange={(e) => setLocForm({ ...locForm, position: e.target.value })}
                     required
-                    placeholder="如 5"
-                    inputMode="numeric"
+                    placeholder="如 5 或 L1/R1"
+                    inputMode="text"
                   />
                 </div>
               </div>

@@ -830,12 +830,12 @@ export default function MobileWarehouses() {
                 const occupied = (l.inventory || []).filter((inv: any) => inv.product)
                 return (
                 <Card key={l.id}>
-                  <CardContent className="p-3">
+                  <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3 flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           {l.zone && (
-                            <span className="inline-flex items-center justify-center h-8 w-8 rounded-md bg-primary/10 text-primary text-sm font-bold">
+                            <span className="inline-flex items-center justify-center h-10 w-10 rounded-lg bg-primary/10 text-primary text-base font-bold">
                               {l.zone}
                             </span>
                           )}
@@ -1307,11 +1307,11 @@ export default function MobileWarehouses() {
                   <Input
                     value={locForm.position}
                     onChange={(e) =>
-                      setLocForm({ ...locForm, position: e.target.value.replace(/[^0-9]/g, '') })
+                      setLocForm({ ...locForm, position: e.target.value })
                     }
                     required
-                    placeholder="如 5"
-                    inputMode="numeric"
+                    placeholder="如 5 或 L1/R1"
+                    inputMode="text"
                     className="h-10"
                   />
                 </div>
