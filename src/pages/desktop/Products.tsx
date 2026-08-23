@@ -104,6 +104,9 @@ export default function ProductsPage() {
   const [inlineLocProductId, setInlineLocProductId] = useState<string | null>(null)
   const [inlineLocId, setInlineLocId] = useState('')
   const [inlineLocQty, setInlineLocQty] = useState('')
+  // 暂未入仓数量内联编辑
+  const [editUnallocProductId, setEditUnallocProductId] = useState<string | null>(null)
+  const [editUnallocQty, setEditUnallocQty] = useState('')
 
   const { data: categories } = useQuery({
     queryKey: ['categories'],
@@ -264,6 +267,26 @@ export default function ProductsPage() {
       if (error) throw error
       return data as ProductWithTags[]
     },
+  })
+
+  // 修改/清零暂未入仓数量
+  const updateUnalloc = useMutation({
+    mutationFn: async ({ productId, qty }: { productId: string; qty: number }) => {
+      const { error } = await supabase
+        .from('products')
+        .update({ unallocated_quantity: qty })
+        .eq('id', productId)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      toast.success('暂未入仓数量已更新')
+      queryClient.invalidateQueries({ queryKey: ['products-qty-map'] })
+      queryClient.invalidateQueries({ queryKey: ['products-locations-map'] })
+      queryClient.invalidateQueries({ queryKey: ['products'] })
+      setEditUnallocProductId(null)
+      setEditUnallocQty('')
+    },
+    onError: (err: any) => toast.error(err.message || '更新失败'),
   })
 
   const createMutation = useMutation({
@@ -1072,21 +1095,24 @@ export default function ProductsPage() {
                         {locations.length === 0 ? (
                           <span className="text-muted-foreground text-xs">-</span>
                         ) : (
-                          locations.map((loc, idx) => (
+                          locations.map((loc, idx) => {
+                            const isUnalloc = !!loc.isUnallocated
+                            const editing = isUnalloc && editUnallocProductId === p.id
+                            return (
                             <div
                               key={idx}
                               className={`flex items-center gap-1 text-xs px-1.5 py-0.5 rounded ${
-                                loc.isUnallocated ? 'bg-amber-50 border border-amber-200' : ''
+                                isUnalloc ? 'bg-amber-50 border border-amber-200' : ''
                               }`}
                             >
-                              {loc.isUnallocated ? (
+                              {isUnalloc ? (
                                 <Package className="h-3 w-3 text-amber-600" />
                               ) : (
                                 <MapPin className="h-3 w-3 text-muted-foreground" />
                               )}
                               <span
                                 className={`font-mono ${
-                                  loc.isUnallocated ? 'text-amber-700 font-medium' : ''
+                                  isUnalloc ? 'text-amber-700 font-medium' : ''
                                 }`}
                               >
                                 {loc.code}
@@ -1094,15 +1120,62 @@ export default function ProductsPage() {
                               {loc.warehouseName && (
                                 <span className="text-muted-foreground">({loc.warehouseName})</span>
                               )}
-                              <span
-                                className={
-                                  loc.isUnallocated ? 'text-amber-700 font-medium' : 'text-muted-foreground'
-                                }
-                              >
-                                : {loc.quantity}
-                              </span>
+                              {editing ? (
+                                <>
+                                  <input
+                                    type="number"
+                                    value={editUnallocQty}
+                                    onChange={(e) => setEditUnallocQty(e.target.value)}
+                                    className="w-14 h-5 rounded border border-amber-300 px-1 text-xs bg-white"
+                                    autoFocus
+                                  />
+                                  <button
+                                    type="button"
+                                    className="text-emerald-600 hover:text-emerald-800 px-0.5 font-bold"
+                                    onClick={() => {
+                                      const q = Number(editUnallocQty)
+                                      if (Number.isNaN(q) || q < 0) { toast.error('数量无效'); return }
+                                      updateUnalloc.mutate({ productId: p.id, qty: q })
+                                    }}
+                                  >✓</button>
+                                  <button
+                                    type="button"
+                                    className="text-muted-foreground hover:text-foreground px-0.5"
+                                    onClick={() => { setEditUnallocProductId(null); setEditUnallocQty('') }}
+                                  ><X className="h-3 w-3" /></button>
+                                </>
+                              ) : (
+                                <span
+                                  className={
+                                    isUnalloc ? 'text-amber-700 font-medium' : 'text-muted-foreground'
+                                  }
+                                >
+                                  : {loc.quantity}
+                                </span>
+                              )}
+                              {isUnalloc && canWrite() && !editing && (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="text-amber-600 hover:text-amber-800 px-0.5"
+                                    title="修改暂未入仓数量"
+                                    onClick={() => { setEditUnallocProductId(p.id); setEditUnallocQty(String(loc.quantity)) }}
+                                  ><Edit2 className="h-2.5 w-2.5" /></button>
+                                  <button
+                                    type="button"
+                                    className="text-red-500 hover:text-red-700 px-0.5"
+                                    title="清零暂未入仓数量"
+                                    onClick={() => {
+                                      if (window.confirm('清零该产品的暂未入仓数量？')) {
+                                        updateUnalloc.mutate({ productId: p.id, qty: 0 })
+                                      }
+                                    }}
+                                  ><Trash2 className="h-2.5 w-2.5" /></button>
+                                </>
+                              )}
                             </div>
-                          ))
+                            )
+                          })
                         )}
                         {canWrite() && inlineLocProductId === p.id ? (
                           <div className="flex items-center gap-1 mt-1">

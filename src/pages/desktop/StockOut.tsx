@@ -1,8 +1,9 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   ArrowUpFromLine,
+  MapPin,
   Package,
   AlertTriangle,
   ImagePlus,
@@ -38,6 +39,7 @@ export default function StockOutPage() {
   const [scannerOpen, setScannerOpen] = useState(false)
   const [product, setProduct] = useState<Product | null>(null)
   const [locationId, setLocationId] = useState('')
+  const [locSearch, setLocSearch] = useState('')
   const [quantity, setQuantity] = useState('')
   const [batchNo, setBatchNo] = useState('')
   const [remark, setRemark] = useState('')
@@ -125,6 +127,16 @@ export default function StockOutPage() {
   const selectedLocationQty = useMemo(() => {
     const inv = inventoryList?.find((i) => i.location_id === locationId)
     return inv ? Number(inv.quantity) : 0
+  }, [inventoryList, locationId])
+
+  // 扫码/选择产品后，自动选中最近入库库位（inventoryList 已按 updated_at 降序）
+  useEffect(() => {
+    if (inventoryList && inventoryList.length > 0 && !locationId) {
+      setLocationId(inventoryList[0].location_id)
+    }
+    if (inventoryList && inventoryList.length === 0) {
+      setLocationId('')
+    }
   }, [inventoryList, locationId])
 
   const stockOutMutation = useMutation({
@@ -317,35 +329,64 @@ export default function StockOutPage() {
                       该产品暂无库存，请先入库
                     </div>
                   ) : (
-                    <div className="space-y-2 max-h-48 overflow-y-auto">
-                      {inventoryList?.map((inv) => (
+                    <>
+                      <div className="relative">
+                        <MapPin className="absolute left-2.5 top-3 h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        <Input
+                          placeholder="搜索库位编码或仓库..."
+                          value={locSearch}
+                          onChange={(e) => setLocSearch(e.target.value)}
+                          className="pl-8 h-11 border-primary/30 focus:border-primary"
+                        />
+                      </div>
+                      <div className="space-y-2 max-h-72 overflow-y-auto">
+                        {inventoryList?.filter((inv) => {
+                          if (!locSearch.trim()) return true
+                          const kwl = locSearch.trim().toLowerCase()
+                          const code = `${inv.location.warehouse.code} / ${inv.location.code}`.toLowerCase()
+                          const desc = (inv.location.description || '').toLowerCase()
+                          const wname = (inv.location.warehouse.name || '').toLowerCase()
+                          return code.includes(kwl) || desc.includes(kwl) || wname.includes(kwl)
+                        }).map((inv) => {
+                          const selected = locationId === inv.location_id
+                          return (
                         <button
                           key={inv.id}
                           type="button"
                           onClick={() => setLocationId(inv.location_id)}
                           className={`w-full flex items-center justify-between p-3 rounded-md border text-left transition-colors ${
-                            locationId === inv.location_id
-                              ? 'bg-primary/10 ring-1 ring-primary border-primary/30'
-                              : 'hover:bg-muted'
+                            selected
+                              ? 'bg-blue-100 border-blue-500 ring-2 ring-blue-400'
+                              : 'bg-blue-50 border-blue-300 hover:bg-blue-100'
                           }`}
                         >
-                          <div>
-                            <div className="font-mono text-sm font-medium">
-                              {inv.location.warehouse.code} / {inv.location.code}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <Package className="h-3.5 w-3.5 text-blue-600 flex-shrink-0" />
+                              <span className="font-mono text-sm font-bold text-blue-900">
+                                {inv.location.warehouse.code} / {inv.location.code}
+                              </span>
+                              {selected && (
+                                <span className="text-xs font-medium text-blue-700 bg-blue-200 px-1.5 py-0.5 rounded-full">
+                                  ✓ 已选中
+                                </span>
+                              )}
                             </div>
-                            <div className="text-xs text-muted-foreground">
+                            <div className="text-xs text-muted-foreground truncate mt-0.5">
                               {inv.location.warehouse.name || inv.location.warehouse.code}
                               {inv.location.description && ` · ${inv.location.description}`}
                               {inv.batch_no && ` · 批次: ${inv.batch_no}`}
                             </div>
                           </div>
-                          <div className="text-right">
-                            <div className="font-bold">{inv.quantity}</div>
+                          <div className="text-right flex-shrink-0 ml-2">
+                            <div className="font-bold text-blue-900">{inv.quantity}</div>
                             <div className="text-xs text-muted-foreground">{product.unit}</div>
                           </div>
                         </button>
-                      ))}
-                    </div>
+                          )
+                        })}
+                      </div>
+                    </>
                   )}
                 </div>
 
@@ -442,20 +483,27 @@ export default function StockOutPage() {
               </div>
             ) : (
               <div className="space-y-2">
-                {inventoryList?.map((inv) => (
+                {inventoryList?.map((inv) => {
+                  const selected = locationId === inv.location_id
+                  return (
                   <div
                     key={inv.id}
-                    className="p-2 rounded border text-sm"
+                    className={`p-2.5 rounded border text-sm ${
+                      selected
+                        ? 'bg-blue-100 border-blue-500'
+                        : 'bg-blue-50/50 border-blue-200'
+                    }`}
                   >
                     <div className="flex justify-between items-center">
-                      <span className="font-mono">{inv.location.code}</span>
-                      <span className="font-bold">{inv.quantity} {product.unit}</span>
+                      <span className="font-mono font-bold text-blue-900">{inv.location.code}</span>
+                      <span className="font-bold text-blue-900">{inv.quantity} {product.unit}</span>
                     </div>
-                    <div className="text-xs text-muted-foreground">
+                    <div className="text-xs text-muted-foreground truncate">
                       {inv.location.warehouse.name || inv.location.warehouse.code}
                     </div>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </CardContent>

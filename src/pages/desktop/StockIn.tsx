@@ -277,6 +277,21 @@ export default function StockInPage() {
                 <CardDescription>选择产品（手动或扫码），填写入库数量</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                {/* 扫码识别到已在库商品：醒目提示条 */}
+                {scanMode && productStocks && productStocks.length > 0 && (
+                  <div className="flex items-center gap-2 p-3 rounded-md bg-blue-50 border-2 border-blue-400 text-sm">
+                    <Package className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                    <span className="text-blue-800">
+                      该商品已在 <b className="font-bold">{productStocks.length}</b> 个库位有库存
+                      {selectedLocation && (
+                        <>
+                          ，已为你选中最近库位：
+                          <b className="font-mono font-bold text-blue-900">{selectedLocation.code}</b>
+                        </>
+                      )}
+                    </span>
+                  </div>
+                )}
                 {/* 产品选择 */}
                 <div className="space-y-2">
                   <Label>选择产品 *</Label>
@@ -403,7 +418,7 @@ export default function StockInPage() {
                           className="disabled:opacity-50"
                         />
                         {filteredLocations.length > 0 && (
-                          <div className="max-h-48 overflow-y-auto rounded-md border border-input divide-y">
+                          <div className="max-h-60 overflow-y-auto rounded-md border border-input divide-y divide-blue-100">
                             {filteredLocations.map((l) => {
                               const stock = productStocks?.find((s) => s.location_id === l.id)
                               return (
@@ -414,13 +429,19 @@ export default function StockInPage() {
                                     setLocationId(l.id)
                                     setLocSearch('')
                                   }}
-                                  className={`flex w-full items-center justify-between px-3 py-2 text-sm hover:bg-accent transition-colors ${
-                                    stock ? 'bg-blue-50/50' : ''
+                                  className={`flex w-full items-center justify-between px-3 py-2.5 text-sm transition-colors border-l-4 ${
+                                    stock
+                                      ? 'bg-blue-50 border-blue-500 hover:bg-blue-100'
+                                      : 'border-transparent hover:bg-accent'
                                   }`}
                                 >
                                   <div className="flex items-center gap-2">
-                                    <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
-                                    <span className="font-medium">{l.code}</span>
+                                    {stock ? (
+                                      <Package className="h-3.5 w-3.5 text-blue-600 flex-shrink-0" />
+                                    ) : (
+                                      <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+                                    )}
+                                    <span className={`font-medium ${stock ? 'text-blue-900' : ''}`}>{l.code}</span>
                                     {l.description && (
                                       <span className="text-xs text-muted-foreground truncate max-w-32">
                                         {l.description}
@@ -428,8 +449,8 @@ export default function StockInPage() {
                                     )}
                                   </div>
                                   {stock && (
-                                    <span className="text-xs text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded flex-shrink-0">
-                                      现有 {stock.quantity}
+                                    <span className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 bg-blue-200 px-2 py-0.5 rounded-full flex-shrink-0">
+                                      ✓ 当前库存 {stock.quantity}
                                     </span>
                                   )}
                                 </button>

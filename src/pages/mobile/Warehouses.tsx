@@ -960,7 +960,7 @@ export default function MobileWarehouses() {
               )})}
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-3">
               {(() => {
                 const groups = groupLocations(locations || [])
                 return groups.map((g) => {
@@ -973,24 +973,24 @@ export default function MobileWarehouses() {
                       {/* 区域头 */}
                       <button
                         type="button"
-                        className="w-full flex items-center gap-2 px-3 py-2 bg-muted/50 hover:bg-muted transition-colors"
+                        className="w-full flex items-center gap-2 px-4 py-3 bg-muted/50 hover:bg-muted transition-colors"
                         onClick={() => toggleZone(g.zone)}
                       >
                         <ChevronDown
-                          className={`h-4 w-4 text-muted-foreground transition-transform ${
+                          className={`h-5 w-5 text-muted-foreground transition-transform ${
                             zoneCollapsed ? '-rotate-90' : ''
                           }`}
                         />
-                        <span className="inline-flex items-center justify-center h-7 w-7 rounded-md bg-primary/15 text-primary text-sm font-bold">
+                        <span className="inline-flex items-center justify-center h-9 w-9 rounded-lg bg-primary/15 text-primary text-base font-bold">
                           {g.zone}
                         </span>
-                        <span className="font-semibold text-sm">
+                        <span className="font-semibold text-base">
                           {g.zone}区
                         </span>
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-sm text-muted-foreground">
                           {zoneStats.total}个 · 占{zoneStats.occupied}
                         </span>
-                        <span className="ml-auto text-xs text-muted-foreground">
+                        <span className="ml-auto text-sm text-muted-foreground">
                           {g.racks.length}架
                         </span>
                       </button>
@@ -1010,20 +1010,20 @@ export default function MobileWarehouses() {
                                 {/* 货架头 */}
                                 <button
                                   type="button"
-                                  className="w-full flex items-center gap-2 px-2.5 py-1.5 bg-muted/30 hover:bg-muted/60 transition-colors"
+                                  className="w-full flex items-center gap-2 px-3 py-2 bg-muted/30 hover:bg-muted/60 transition-colors"
                                   onClick={() =>
                                     toggleRack(g.zone, r.rack)
                                   }
                                 >
                                   <ChevronDown
-                                    className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${
+                                    className={`h-4 w-4 text-muted-foreground transition-transform ${
                                       rackCollapsed ? '-rotate-90' : ''
                                     }`}
                                   />
-                                  <span className="text-sm font-medium">
+                                  <span className="text-base font-medium">
                                     货架 {r.rack}
                                   </span>
-                                  <span className="text-xs text-muted-foreground">
+                                  <span className="text-sm text-muted-foreground">
                                     {rackStats.total}库位 · {rackStats.occupied}占用
                                   </span>
                                 </button>
@@ -1041,22 +1041,22 @@ export default function MobileWarehouses() {
                                         >
                                           <button
                                             type="button"
-                                            className="w-full flex items-center gap-2 px-2 py-1 bg-primary/5 hover:bg-primary/10 transition-colors"
+                                            className="w-full flex items-center gap-2 px-3 py-1.5 bg-primary/5 hover:bg-primary/10 transition-colors"
                                             onClick={() =>
                                               toggleLevel(g.zone, r.rack, lvGroup.level)
                                             }
                                           >
                                             <ChevronDown
-                                              className={`h-3 w-3 text-muted-foreground transition-transform ${
+                                              className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${
                                                 lvCollapsed ? '-rotate-90' : ''
                                               }`}
                                             />
-                                            <span className="text-xs font-semibold text-primary/90">
+                                            <span className="text-sm font-semibold text-primary/90">
                                               {lvGroup.level === '未分层'
                                                 ? lvGroup.level
                                                 : `${lvGroup.level} 层`}
                                             </span>
-                                            <span className="text-[10px] text-muted-foreground ml-auto">
+                                            <span className="text-xs text-muted-foreground ml-auto">
                                               {lvStats.total}库位 · {lvStats.occupied}占用
                                             </span>
                                           </button>
@@ -1069,14 +1069,14 @@ export default function MobileWarehouses() {
                                                 return (
                                                   <div
                                                     key={l.id}
-                                                    className={`flex items-center gap-2 p-2 rounded-md border transition-colors ${
+                                                    className={`flex items-center gap-2 p-3 rounded-md border transition-colors ${
                                                       occupied.length > 0
                                                         ? 'border-blue-200 bg-blue-50/30'
                                                         : 'border-border'
                                                     }`}
                                                   >
                                                     <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                                                      <span className="font-mono text-[11px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded flex-shrink-0">
+                                                      <span className="font-mono text-sm text-muted-foreground bg-muted px-2 py-1 rounded flex-shrink-0">
                                                         {l.level}-{l.position}
                                                       </span>
                                                       {occupied.length > 0 ? (
@@ -1084,9 +1084,9 @@ export default function MobileWarehouses() {
                                                           {occupied.map((inv: any) => (
                                                             <span
                                                               key={inv.id}
-                                                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-blue-100 text-blue-700 truncate max-w-full"
+                                                              className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-blue-100 text-blue-800 border border-blue-300 truncate max-w-full"
                                                             >
-                                                              <Package className="h-3 w-3 flex-shrink-0" />
+                                                              <Package className="h-3.5 w-3.5 flex-shrink-0" />
                                                               <button
                                                                 type="button"
                                                                 className="truncate underline-offset-2 hover:underline"
