@@ -1,4 +1,4 @@
-import { useState, useMemo, useDeferredValue, useEffect } from 'react'
+import { useState, useMemo, useDeferredValue, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -13,6 +13,7 @@ import {
   Tag,
   MapPin,
   Package,
+  ArrowUp,
 } from 'lucide-react'
 import {
   supabase,
@@ -885,24 +886,34 @@ export default function MobileProducts() {
   }
 
   // 产品列表按库位顺序排列：先按仓库名/编码，再按库位编码
+  const PAGE_SIZE = 30
+  const [page, setPage] = useState(1)
+  const [showTop, setShowTop] = useState(false)
+  const listRef = useRef<HTMLDivElement>(null)
+
+  // 排序：无 SKU 在最前，其他按 SKU 升序
   const sortedProducts = useMemo(() => {
     if (!products) return products
     return [...products].sort((a, b) => {
-      const aLocs = productLocationsMap?.get(a.id) || []
-      const bLocs = productLocationsMap?.get(b.id) || []
-      const aFirst = aLocs[0]
-      const bFirst = bLocs[0]
-      if (!aFirst && !bFirst) return 0
-      if (!aFirst) return 1
-      if (!bFirst) return -1
-      const aWh = aFirst.warehouseName || ''
-      const bWh = bFirst.warehouseName || ''
-      if (aWh !== bWh) return aWh.localeCompare(bWh, 'zh-CN')
-      const aCode = aFirst.code || ''
-      const bCode = bFirst.code || ''
-      return aCode.localeCompare(bCode, 'zh-CN', { numeric: true })
+      const aSku = (a.sku || '').trim()
+      const bSku = (b.sku || '').trim()
+      const aNo = !aSku
+      const bNo = !bSku
+      if (aNo !== bNo) return aNo ? -1 : 1
+      if (aNo && bNo) return (b.created_at || '').localeCompare(a.created_at || '')
+      return aSku.localeCompare(bSku, 'zh-CN', { numeric: true })
     })
-  }, [products, productLocationsMap])
+  }, [products])
+
+  useEffect(() => { setPage(1) }, [deferredSearch, categoryFilter])
+
+  const totalPages = Math.max(1, Math.ceil((sortedProducts?.length || 0) / PAGE_SIZE))
+  const pagedProducts = useMemo(
+    () => sortedProducts?.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [sortedProducts, page],
+  )
+
+  const scrollTop = () => listRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
 
   return (
     <div className="flex flex-col h-full">
@@ -948,7 +959,7 @@ export default function MobileProducts() {
       </div>
 
       {/* 产品列表 */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+      <div ref={listRef} onScroll={(e) => setShowTop(e.currentTarget.scrollTop > 300)} className="flex-1 overflow-y-auto p-3 space-y-2">
         {isLoading ? (
           <div className="text-center py-12 text-muted-foreground text-sm">加载中...</div>
         ) : sortedProducts?.length === 0 ? (
@@ -965,7 +976,7 @@ export default function MobileProducts() {
             )}
           </div>
         ) : (
-          sortedProducts?.map((p) => {
+          pagedProducts?.map((p) => {
             const productTags = getProductTags(p)
             const totalQty = productQtyMap?.get(p.id) || 0
             const isOutOfStock = totalQty === 0
@@ -1218,7 +1229,29 @@ export default function MobileProducts() {
             )
           })
         )}
+
+        {(sortedProducts?.length || 0) > PAGE_SIZE && (
+          <div className="flex items-center justify-center gap-2 py-3 text-xs">
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(page - 1); scrollTop() }}>
+              上一页
+            </Button>
+            <span className="text-muted-foreground">{page}/{totalPages}页·共{sortedProducts?.length}</span>
+            <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(page + 1); scrollTop() }}>
+              下一页
+            </Button>
+          </div>
+        )}
       </div>
+
+      {showTop && (
+        <button
+          onClick={scrollTop}
+          className="fixed bottom-6 right-4 z-30 h-11 w-11 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center"
+          aria-label="返回顶部"
+        >
+          <ArrowUp className="h-5 w-5" />
+        </button>
+      )}
 
       {/* 新增/编辑对话框 */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

@@ -10,6 +10,7 @@ import {
   ScanLine,
   Camera,
   X,
+  Zap,
 } from 'lucide-react'
 import { supabase, getProductImageUrl } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
@@ -45,6 +46,7 @@ export default function StockOutPage() {
   const [remark, setRemark] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [scanMode, setScanMode] = useState(false)
+  const [quickMode, setQuickMode] = useState(false)
   const [searchingBarcode, setSearchingBarcode] = useState(false)
 
   // 通过条形码查找产品：优先从本地缓存匹配（无网络往返），未命中再走网络查询
@@ -58,7 +60,7 @@ export default function StockOutPage() {
         setProduct(localMatch)
         setScanMode(true)
         setLocationId('')
-        setQuantity('')
+        setQuantity('1')
         toast.success(`已识别产品：${localMatch.name}`)
         return
       }
@@ -73,7 +75,7 @@ export default function StockOutPage() {
         setProduct(data as Product)
         setScanMode(true)
         setLocationId('')
-        setQuantity('')
+        setQuantity('1')
         toast.success(`已识别产品：${(data as Product).name}`)
       } else {
         toast.warning(`未找到条形码为「${barcode}」的产品，请手动选择`)
@@ -85,10 +87,67 @@ export default function StockOutPage() {
     }
   }, [queryClient])
 
+  // 快速出库：扫码即出 1 个，自动选最近库位，连续扫码
+  const quickStockOut = useCallback(async (barcode: string) => {
+    setScannerOpen(false)
+    try {
+      // 1. 识别产品：优先本地缓存匹配 barcode/sku，未命中走网络
+      const cached = queryClient.getQueryData<Product[]>(['products', ''])
+      let p: Product | undefined = cached?.find((item) => item.barcode === barcode || item.sku === barcode)
+      if (!p) {
+        const { data, error } = await supabase
+          .from('products')
+          .select('*')
+          .or(`barcode.eq.${barcode},sku.eq.${barcode}`)
+          .maybeSingle()
+        if (error) throw error
+        p = (data as Product) || undefined
+      }
+      if (!p) {
+        toast.warning(`未找到「${barcode}」对应产品`)
+        return
+      }
+      // 2. 查最近入库库位（按 updated_at 降序取第一条）
+      const { data: inv, error: invErr } = await supabase
+        .from('inventory')
+        .select('location_id, location:locations(id, code, warehouse:warehouses(id, name, code))')
+        .eq('product_id', p.id)
+        .gt('quantity', 0)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+      if (invErr) throw invErr
+      if (!inv || inv.length === 0) {
+        toast.warning(`「${p.name}」无库存，无法出库`)
+        return
+      }
+      const target = inv[0] as any
+      // 3. 调用出库 RPC（参数名与 handleSubmit 保持一致）
+      const { error: rpcErr } = await supabase.rpc('stock_out', {
+        p_product_id: p.id,
+        p_location_id: target.location_id,
+        p_quantity: 1,
+        p_scan_mode: 'quick',
+        p_batch_no: null,
+        p_remark: null,
+        p_operator_id: user?.id || null,
+      })
+      if (rpcErr) throw rpcErr
+      toast.success(`已出库 1 个：${p.name}（${target.location?.warehouse?.name || ''} / ${target.location?.code}）`)
+      queryClient.invalidateQueries({ queryKey: ['product-inventory'] })
+      queryClient.invalidateQueries({ queryKey: ['inventory'] })
+      queryClient.invalidateQueries({ queryKey: ['products'] })
+    } catch (err: any) {
+      toast.error(err.message || '快速出库失败')
+    } finally {
+      if (quickMode) setScannerOpen(true)
+    }
+  }, [queryClient, user, quickMode])
+
   // 扫码枪监听（电脑端自动启用）
   useBarcodeGun({
     onScan: (code) => {
-      findProductByBarcode(code)
+      if (quickMode) quickStockOut(code)
+      else findProductByBarcode(code)
     },
     enabled: !isMobile,
   })
@@ -186,7 +245,7 @@ export default function StockOutPage() {
     setProduct(p)
     setScanMode(false)
     setLocationId('')
-    setQuantity('')
+    setQuantity('1')
   }
 
   const handleScannerResult = (code: string) => {
@@ -227,6 +286,30 @@ export default function StockOutPage() {
                 <CardDescription>选择产品和库位，填写出库数量</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                {/* 快速出库开关 */}
+                <Button
+                  type="button"
+                  variant={quickMode ? 'default' : 'outline'}
+                  onClick={() => {
+                    const v = !quickMode
+                    setQuickMode(v)
+                    if (v) {
+                      setScannerOpen(true)
+                      setProduct(null)
+                      setQuantity('')
+                    } else {
+                      setScannerOpen(false)
+                    }
+                  }}
+                >
+                  <Zap className="h-4 w-4 mr-1" />
+                  快速出库
+                </Button>
+                {quickMode && (
+                  <div className="text-xs text-blue-600 bg-blue-50 rounded p-2">
+                    快速出库：扫码即出 1 个，自动选最近库位，连续扫码
+                  </div>
+                )}
                 {/* 产品选择 */}
                 <div className="space-y-2">
                   <Label>选择产品 *</Label>
@@ -312,6 +395,7 @@ export default function StockOutPage() {
                   )}
                 </div>
 
+                {!quickMode && (<>
                 {/* 库位选择（从库存里选） */}
                 <div className="space-y-2">
                   <Label>选择库位 *</Label>
@@ -405,9 +489,9 @@ export default function StockOutPage() {
                       id="qty"
                       type="number"
                       min="0"
-                      step="0.01"
+                      step="1"
                       value={quantity}
-                      onChange={(e) => setQuantity(e.target.value)}
+                      onChange={(e) => { const n = parseInt(e.target.value, 10); setQuantity(isNaN(n) || n < 0 ? '' : String(n)) }}
                       required
                       placeholder="出库数量"
                       className={isOverStock ? 'border-red-500' : ''}
@@ -458,6 +542,7 @@ export default function StockOutPage() {
                   <ArrowUpFromLine className="mr-2 h-4 w-4" />
                   {submitting ? '提交中...' : '确认出库'}
                 </Button>
+                </>)}
               </CardContent>
             </Card>
           </form>
@@ -519,7 +604,7 @@ export default function StockOutPage() {
       <Scanner
         open={scannerOpen}
         onClose={() => setScannerOpen(false)}
-        onScan={handleScannerResult}
+        onScan={quickMode ? quickStockOut : handleScannerResult}
       />
     </div>
   )

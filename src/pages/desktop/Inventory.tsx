@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Search, ImagePlus, MapPin, Tag, X, AlertTriangle } from 'lucide-react'
+import { Search, ImagePlus, MapPin, Tag, X, AlertTriangle, ArrowUp } from 'lucide-react'
 import { supabase, getProductImageUrl } from '@/lib/supabase'
 import type { Category as CategoryType, Tag as TagType } from '@/types'
 import { useOutOfStock } from '@/hooks/useOutOfStock'
@@ -187,8 +187,24 @@ export default function InventoryPage() {
     setSelectedTagFilter([])
   }
 
+  const [showTop, setShowTop] = useState(false)
+  useEffect(() => {
+    const onScroll = () => setShowTop(window.scrollY > 300)
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+
   return (
     <div className="space-y-4">
+      {showTop && (
+        <button
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          className="fixed bottom-6 right-6 z-30 h-11 w-11 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center"
+          aria-label="返回顶部"
+        >
+          <ArrowUp className="h-5 w-5" />
+        </button>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">库存查询</h2>

@@ -241,7 +241,7 @@ function MobileHomeInner() {
     () =>
       [
         {
-          to: '/m/scan?type=in',
+          to: '/m/stock-in?scan=1',
           label: '扫码入库',
           icon: ArrowDownToLine,
           iconClass: 'text-emerald-600',
@@ -249,7 +249,7 @@ function MobileHomeInner() {
           requireWrite: true,
         },
         {
-          to: '/m/scan?type=out',
+          to: '/m/stock-out?scan=1',
           label: '扫码出库',
           icon: ArrowUpFromLine,
           iconClass: 'text-amber-600',

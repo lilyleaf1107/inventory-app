@@ -2,7 +2,7 @@ import { useState, useMemo, useDeferredValue, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Search, Edit2, Trash2, ImagePlus, X, Tag, MapPin, Package } from 'lucide-react'
+import { Plus, Search, Edit2, Trash2, ImagePlus, X, Tag, MapPin, Package, ArrowUp } from 'lucide-react'
 import { supabase, getProductImageUrl, uploadProductImage, deleteProductImage } from '@/lib/supabase'
 import type { Product, Category as CategoryType, Tag as TagType } from '@/types'
 import { useAuthStore } from '@/store/auth'
@@ -893,31 +893,42 @@ export default function ProductsPage() {
   }
 
   // 产品列表按库位顺序排列：先按仓库名/编码，再按库位编码
+  const PAGE_SIZE = 30
+  const [page, setPage] = useState(1)
+  const [showTop, setShowTop] = useState(false)
+
+  // 排序：无 SKU 在最前，其他按 SKU 升序（数字段自然排序）
   const sortedProducts = useMemo(() => {
     if (!products) return products
     return [...products].sort((a, b) => {
-      const aLocs = productLocationsMap?.get(a.id) || []
-      const bLocs = productLocationsMap?.get(b.id) || []
-      const aFirst = aLocs[0]
-      const bFirst = bLocs[0]
-      // 没有库位的产品排在最后
-      if (!aFirst && !bFirst) return 0
-      if (!aFirst) return 1
-      if (!bFirst) return -1
-      // 先按仓库名/编码排序
-      const aWh = aFirst.warehouseName || ''
-      const bWh = bFirst.warehouseName || ''
-      if (aWh !== bWh) return aWh.localeCompare(bWh, 'zh-CN')
-      // 再按库位编码排序（自然排序，支持数字分段）
-      const aCode = aFirst.code || ''
-      const bCode = bFirst.code || ''
-      return aCode.localeCompare(bCode, 'zh-CN', { numeric: true })
+      const aSku = (a.sku || '').trim()
+      const bSku = (b.sku || '').trim()
+      const aNo = !aSku
+      const bNo = !bSku
+      if (aNo !== bNo) return aNo ? -1 : 1
+      if (aNo && bNo) return (b.created_at || '').localeCompare(a.created_at || '')
+      return aSku.localeCompare(bSku, 'zh-CN', { numeric: true })
     })
-  }, [products, productLocationsMap])
+  }, [products])
+
+  // 搜索/筛选变化时回到第 1 页
+  useEffect(() => { setPage(1) }, [deferredSearch, categoryFilter, selectedTagFilter])
+
+  const totalPages = Math.max(1, Math.ceil((sortedProducts?.length || 0) / PAGE_SIZE))
+  const pagedProducts = useMemo(
+    () => sortedProducts?.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [sortedProducts, page],
+  )
+
+  useEffect(() => {
+    const onScroll = () => setShowTop(window.scrollY > 300)
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="sticky top-0 z-20 bg-background py-2 -mx-1 px-1 flex items-center justify-between border-b shadow-sm">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">产品管理</h2>
           <p className="text-sm text-muted-foreground">管理所有产品信息和图片</p>
@@ -1010,7 +1021,7 @@ export default function ProductsPage() {
                 </TableCell>
               </TableRow>
             ) : (
-              sortedProducts?.map((p) => {
+              pagedProducts?.map((p) => {
                 const productTags = getProductTags(p)
                 const totalQty = productQtyMap?.get(p.id) || 0
                 const isOutOfStock = totalQty === 0
@@ -1286,6 +1297,28 @@ export default function ProductsPage() {
           </TableBody>
         </Table>
       </div>
+
+      {(sortedProducts?.length || 0) > PAGE_SIZE && (
+        <div className="flex items-center justify-center gap-3 py-2 text-sm">
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(page - 1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+            上一页
+          </Button>
+          <span className="text-muted-foreground">第 {page} / {totalPages} 页 · 共 {sortedProducts?.length} 个</span>
+          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(page + 1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+            下一页
+          </Button>
+        </div>
+      )}
+
+      {showTop && (
+        <button
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          className="fixed bottom-6 right-6 z-30 h-11 w-11 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center hover:opacity-90"
+          aria-label="返回顶部"
+        >
+          <ArrowUp className="h-5 w-5" />
+        </button>
+      )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">

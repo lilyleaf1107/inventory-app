@@ -48,7 +48,7 @@ export default function StockMovesPage() {
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<'all' | 'in' | 'out'>('all')
 
-  const { data: moves, isLoading } = useQuery({
+  const { data: moves, isLoading, error } = useQuery({
     queryKey: ['stock-moves', search, typeFilter],
     queryFn: async () => {
       let query = supabase
@@ -247,6 +247,14 @@ export default function StockMovesPage() {
               <TableRow>
                 <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                   加载中...
+                </TableCell>
+              </TableRow>
+            ) : error ? (
+              <TableRow>
+                <TableCell colSpan={9} className="text-center py-8 text-destructive">
+                  查询失败：{(error as Error).message}
+                  <br />
+                  <span className="text-xs">若提示外键/嵌套查询错误，请在 Supabase SQL Editor 运行迁移 0016</span>
                 </TableCell>
               </TableRow>
             ) : moves?.length === 0 ? (

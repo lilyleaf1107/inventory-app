@@ -477,9 +477,9 @@ export default function StockInPage() {
                         id="qty"
                         type="number"
                         min="0"
-                        step="0.01"
+                        step="1"
                         value={quantity}
-                        onChange={(e) => setQuantity(e.target.value)}
+                        onChange={(e) => { const n = parseInt(e.target.value, 10); setQuantity(isNaN(n) || n < 0 ? '' : String(n)) }}
                         required
                         placeholder="入库数量"
                         autoFocus={scanMode}

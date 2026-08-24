@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -12,6 +12,7 @@ import {
   Camera,
   X,
   Boxes,
+  Zap,
 } from 'lucide-react'
 import { supabase, getProductImageUrl } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
@@ -31,6 +32,11 @@ export default function MobileStockOut() {
 
   const [pickerOpen, setPickerOpen] = useState(false)
   const [scannerOpen, setScannerOpen] = useState(false)
+  const [searchParams] = useSearchParams()
+  // 首页"扫码出库"入口带 ?scan=1，自动打开扫码器
+  useEffect(() => {
+    if (searchParams.get('scan') === '1') setScannerOpen(true)
+  }, [searchParams])
   const [product, setProduct] = useState<Product | null>(null)
   const [locationId, setLocationId] = useState('')
   const [locSearch, setLocSearch] = useState('')
@@ -39,6 +45,7 @@ export default function MobileStockOut() {
   const [remark, setRemark] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [scanMode, setScanMode] = useState(false)
+  const [quickMode, setQuickMode] = useState(false)
 
   const findProductByBarcode = useCallback(async (barcode: string) => {
     try {
@@ -49,7 +56,7 @@ export default function MobileStockOut() {
         setProduct(localMatch)
         setScanMode(true)
         setLocationId('')
-        setQuantity('')
+        setQuantity('1')
         toast.success(`已识别：${localMatch.name}`)
         return
       }
@@ -64,7 +71,7 @@ export default function MobileStockOut() {
         setProduct(data as Product)
         setScanMode(true)
         setLocationId('')
-        setQuantity('')
+        setQuantity('1')
         toast.success(`已识别：${(data as Product).name}`)
       } else {
         toast.warning(`未找到「${barcode}」对应的产品`)
@@ -73,6 +80,62 @@ export default function MobileStockOut() {
       toast.error(err.message || '查询失败')
     }
   }, [queryClient])
+
+  // 快速出库：扫码即出 1 个，自动选最近库位，连续扫码
+  const quickStockOut = useCallback(async (barcode: string) => {
+    setScannerOpen(false)
+    try {
+      // 1. 识别产品：优先本地缓存匹配 barcode/sku，未命中走网络
+      const cached = queryClient.getQueryData<Product[]>(['products', ''])
+      let p: Product | undefined = cached?.find((item) => item.barcode === barcode || item.sku === barcode)
+      if (!p) {
+        const { data, error } = await supabase
+          .from('products')
+          .select('*')
+          .or(`barcode.eq.${barcode},sku.eq.${barcode}`)
+          .maybeSingle()
+        if (error) throw error
+        p = (data as Product) || undefined
+      }
+      if (!p) {
+        toast.warning(`未找到「${barcode}」对应产品`)
+        return
+      }
+      // 2. 查最近入库库位（按 updated_at 降序取第一条）
+      const { data: inv, error: invErr } = await supabase
+        .from('inventory')
+        .select('location_id, location:locations(id, code, warehouse:warehouses(id, name, code))')
+        .eq('product_id', p.id)
+        .gt('quantity', 0)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+      if (invErr) throw invErr
+      if (!inv || inv.length === 0) {
+        toast.warning(`「${p.name}」无库存，无法出库`)
+        return
+      }
+      const target = inv[0] as any
+      // 3. 调用出库 RPC（参数名与 handleSubmit 保持一致）
+      const { error: rpcErr } = await supabase.rpc('stock_out', {
+        p_product_id: p.id,
+        p_location_id: target.location_id,
+        p_quantity: 1,
+        p_scan_mode: 'quick',
+        p_batch_no: null,
+        p_remark: null,
+        p_operator_id: user?.id || null,
+      })
+      if (rpcErr) throw rpcErr
+      toast.success(`已出库 1 个：${p.name}（${target.location?.warehouse?.name || ''} / ${target.location?.code}）`)
+      queryClient.invalidateQueries({ queryKey: ['product-inventory'] })
+      queryClient.invalidateQueries({ queryKey: ['inventory'] })
+      queryClient.invalidateQueries({ queryKey: ['products'] })
+    } catch (err: any) {
+      toast.error(err.message || '快速出库失败')
+    } finally {
+      if (quickMode) setScannerOpen(true)
+    }
+  }, [queryClient, user, quickMode])
 
   const { data: inventoryList, isLoading: invLoading } = useQuery({
     queryKey: ['product-inventory', product?.id],
@@ -184,6 +247,30 @@ export default function MobileStockOut() {
       <form onSubmit={handleSubmit} className="space-y-3">
         <Card>
           <CardContent className="p-4 space-y-3">
+            {/* 快速出库开关 */}
+            <Button
+              type="button"
+              variant={quickMode ? 'default' : 'outline'}
+              onClick={() => {
+                const v = !quickMode
+                setQuickMode(v)
+                if (v) {
+                  setScannerOpen(true)
+                  setProduct(null)
+                  setQuantity('')
+                } else {
+                  setScannerOpen(false)
+                }
+              }}
+            >
+              <Zap className="h-4 w-4 mr-1" />
+              快速出库
+            </Button>
+            {quickMode && (
+              <div className="text-xs text-blue-600 bg-blue-50 rounded p-2">
+                快速出库：扫码即出 1 个，自动选最近库位，连续扫码
+              </div>
+            )}
             {/* 选产品 */}
             <div className="space-y-2">
               <Label>产品 *</Label>
@@ -246,6 +333,7 @@ export default function MobileStockOut() {
               )}
             </div>
 
+            {!quickMode && (<>
             {/* 库位（带库存显示） */}
             <div className="space-y-2">
               <Label>出库库位 *</Label>
@@ -333,7 +421,7 @@ export default function MobileStockOut() {
                 min="0"
                 step="1"
                 value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
+                onChange={(e) => { const n = parseInt(e.target.value, 10); setQuantity(isNaN(n) || n < 0 ? '' : String(n)) }}
                 placeholder={`请输入数量（最多 ${selectedLocationQty || 0}）`}
                 className={isOver ? 'border-destructive' : ''}
                 required
@@ -367,9 +455,11 @@ export default function MobileStockOut() {
                 placeholder="其他信息..."
               />
             </div>
+            </>)}
           </CardContent>
         </Card>
 
+        {!quickMode && (
         <Button
           type="submit"
           className="w-full h-11"
@@ -384,6 +474,7 @@ export default function MobileStockOut() {
             </span>
           )}
         </Button>
+        )}
       </form>
 
       <ProductPicker
@@ -393,10 +484,10 @@ export default function MobileStockOut() {
           setProduct(p)
           setScanMode(false)
           setLocationId('')
-          setQuantity('')
+          setQuantity('1')
         }}
       />
-      <Scanner open={scannerOpen} onClose={() => setScannerOpen(false)} onScan={findProductByBarcode} />
+      <Scanner open={scannerOpen} onClose={() => setScannerOpen(false)} onScan={quickMode ? quickStockOut : findProductByBarcode} />
     </div>
   )
 }

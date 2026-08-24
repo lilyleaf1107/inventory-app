@@ -17,6 +17,7 @@ import {
   List,
   Package,
   X,
+  Truck,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
@@ -26,6 +27,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent } from '@/components/ui/card'
+import ProductPicker from '@/components/ProductPicker'
 import {
   Dialog,
   DialogContent,
@@ -99,7 +101,7 @@ function groupLocations(locs: any[]) {
   const sortKey = (a: string, b: string) => {
     const na = parseInt(a), nb = parseInt(b)
     if (!isNaN(na) && !isNaN(nb)) return na - nb
-    return a.localeCompare(b)
+    return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
   }
   const sortedZones = Array.from(map.keys()).sort(sortKey)
   return sortedZones.map((zone) => {
@@ -136,11 +138,13 @@ function groupByLevel(locs: any[]) {
   const sortKey = (a: string, b: string) => {
     const na = parseInt(a), nb = parseInt(b)
     if (!isNaN(na) && !isNaN(nb)) return na - nb
-    return a.localeCompare(b)
+    return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
   }
   return Array.from(map.keys()).sort(sortKey).map((level) => ({
     level,
-    locations: map.get(level)!,
+    locations: [...map.get(level)!].sort((a, b) =>
+      (a.code || '').localeCompare(b.code || '', undefined, { numeric: true, sensitivity: 'base' }),
+    ),
   }))
 }
 
@@ -168,6 +172,19 @@ export default function MobileWarehouses() {
   const [invDialogOpen, setInvDialogOpen] = useState(false)
   const [editingInv, setEditingInv] = useState<any>(null)
   const [editingInvQty, setEditingInvQty] = useState('')
+
+  // 功能 A：从库位添加产品
+  const [addProdOpen, setAddProdOpen] = useState(false)
+  const [addProdLocId, setAddProdLocId] = useState<string | null>(null)
+  const [addProdProductId, setAddProdProductId] = useState<string | null>(null)
+  const [addProdQty, setAddProdQty] = useState('1')
+  const [pickerOpen, setPickerOpen] = useState(false)
+  // 功能 B：移动库位库存到新库位
+  const [moveOpen, setMoveOpen] = useState(false)
+  const [moveInv, setMoveInv] = useState<any>(null)
+  const [moveTargetLocId, setMoveTargetLocId] = useState<string>('')
+  const [moveSearch, setMoveSearch] = useState('')
+  const [moveQty, setMoveQty] = useState('')
 
   const { data: warehouses, isLoading } = useQuery({
     queryKey: ['warehouses'],
@@ -505,6 +522,135 @@ export default function MobileWarehouses() {
     setInvDialogOpen(true)
   }
 
+  // 功能 B 需要的全部库位（带 warehouse 关联），用于目标库位选择
+  const { data: allLocations } = useQuery({
+    queryKey: ['all-locations-with-wh'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('locations')
+        .select(`id, code, description, warehouse:warehouses ( id, code, name )`)
+        .order('code')
+      if (error) throw error
+      return data as any[]
+    },
+  })
+
+  // 功能 A：从库位角度添加产品到该库位
+  const addProdToLoc = useMutation({
+    mutationFn: async ({ productId, locId, qty }: { productId: string; locId: string; qty: number }) => {
+      const { error } = await supabase.rpc('stock_in', {
+        p_product_id: productId,
+        p_location_id: locId,
+        p_quantity: qty,
+        p_scan_mode: 'manual',
+        p_remark: '从仓库管理添加',
+      })
+      if (error) throw error
+      return { productId, locId, qty }
+    },
+    onSuccess: async ({ productId, locId, qty }) => {
+      const [prodRes, locRes] = await Promise.all([
+        supabase.from('products').select('name').eq('id', productId).maybeSingle(),
+        supabase.from('locations').select('code').eq('id', locId).maybeSingle(),
+      ])
+      const prodName = (prodRes.data as any)?.name || '产品'
+      const locCode = (locRes.data as any)?.code || ''
+      toast.success(`已添加 ${qty} 个 ${prodName} 到 ${locCode}`)
+      queryClient.invalidateQueries({ queryKey: ['locations'] })
+      queryClient.invalidateQueries({ queryKey: ['all-locations-with-wh'] })
+      queryClient.invalidateQueries({ queryKey: ['products-qty-map'] })
+      queryClient.invalidateQueries({ queryKey: ['products-locations-map'] })
+      setAddProdOpen(false)
+      setAddProdLocId(null)
+      setAddProdProductId(null)
+      setAddProdQty('1')
+    },
+    onError: (err: any) => toast.error(err.message || '添加失败'),
+  })
+
+  // 功能 B：移动库位库存到新库位（调拨两步）
+  const moveStock = useMutation({
+    mutationFn: async (vars: { productId: string; fromLocId: string; toLocId: string; qty: number; fromLocCode: string; toLocCode: string }) => {
+      const { error: outErr } = await supabase.rpc('stock_out', {
+        p_product_id: vars.productId,
+        p_location_id: vars.fromLocId,
+        p_quantity: vars.qty,
+        p_remark: `调拨至 ${vars.toLocCode}`,
+      })
+      if (outErr) {
+        const e: any = new Error(outErr.message)
+        e.step = 1
+        throw e
+      }
+      const { error: inErr } = await supabase.rpc('stock_in', {
+        p_product_id: vars.productId,
+        p_location_id: vars.toLocId,
+        p_quantity: vars.qty,
+        p_remark: `调拨自 ${vars.fromLocCode}`,
+      })
+      if (inErr) {
+        const e: any = new Error(inErr.message)
+        e.step = 2
+        throw e
+      }
+      return vars
+    },
+    onSuccess: async (vars) => {
+      const { data: prod } = await supabase.from('products').select('name').eq('id', vars.productId).maybeSingle()
+      const prodName = (prod as any)?.name || '产品'
+      toast.success(`已移动 ${vars.qty} 个 ${prodName} 到 ${vars.toLocCode}`)
+      queryClient.invalidateQueries({ queryKey: ['locations'] })
+      queryClient.invalidateQueries({ queryKey: ['all-locations-with-wh'] })
+      queryClient.invalidateQueries({ queryKey: ['products-qty-map'] })
+      queryClient.invalidateQueries({ queryKey: ['products-locations-map'] })
+      setMoveOpen(false)
+      setMoveInv(null)
+      setMoveTargetLocId('')
+      setMoveSearch('')
+      setMoveQty('')
+    },
+    onError: (err: any) => {
+      if (err?.step === 1) {
+        toast.error(err.message || '出库失败')
+      } else if (err?.step === 2) {
+        toast.error('调拨未完成，请检查库存')
+      } else {
+        toast.error(err.message || '调拨失败')
+      }
+    },
+  })
+
+  const openAddProd = (loc: any) => {
+    setAddProdLocId(loc.id)
+    setAddProdProductId(null)
+    setAddProdQty('1')
+    setAddProdOpen(true)
+  }
+
+  const openMove = (inv: any, loc: any) => {
+    const qty = Number(inv.quantity) || 0
+    setMoveInv({ ...inv, location: loc, qty })
+    setMoveTargetLocId('')
+    setMoveSearch('')
+    setMoveQty(String(qty))
+    setMoveOpen(true)
+  }
+
+  // 功能 B 目标库位候选列表（排除当前库位）
+  const moveCandidateLocs = (allLocations || []).filter((l) => l.id !== moveInv?.location?.id)
+  const moveFilteredLocs = (() => {
+    const kwl = moveSearch.trim().toLowerCase()
+    if (!kwl) return moveCandidateLocs
+    return moveCandidateLocs.filter((l) => {
+      const whName = l.warehouse?.name || l.warehouse?.code || ''
+      return (
+        l.code.toLowerCase().includes(kwl) ||
+        (l.description && l.description.toLowerCase().includes(kwl)) ||
+        whName.toLowerCase().includes(kwl)
+      )
+    })
+  })()
+
   const openCreateWh = () => {
     setEditingWh(null)
     setWhForm(emptyWh)
@@ -826,7 +972,9 @@ export default function MobileWarehouses() {
             </div>
           ) : locViewMode === 'flat' ? (
             <div className="space-y-2">
-              {locations?.map((l: any) => {
+              {[...(locations || [])].sort((a: any, b: any) =>
+                (a.code || '').localeCompare(b.code || '', undefined, { numeric: true, sensitivity: 'base' }),
+              ).map((l: any) => {
                 const occupied = (l.inventory || []).filter((inv: any) => inv.product)
                 return (
                 <Card key={l.id}>
@@ -874,6 +1022,15 @@ export default function MobileWarehouses() {
                           {l.code}
                         </span>
                         <div className="flex gap-0.5">
+                          {canWrite() && (
+                            <button
+                              onClick={() => openAddProd(l)}
+                              className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-primary transition-colors"
+                              title="添加产品到该库位"
+                            >
+                              <Plus className="h-4 w-4" />
+                            </button>
+                          )}
                           <button
                             onClick={() => openEditLoc(l)}
                             className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
@@ -931,6 +1088,17 @@ export default function MobileWarehouses() {
                                   title="编辑产品信息"
                                 >
                                   <Edit2 className="h-3 w-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ml-0.5 hover:text-foreground transition-colors"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    openMove(inv, l)
+                                  }}
+                                  title="移动到新库位"
+                                >
+                                  <Truck className="h-3 w-3" />
                                 </button>
                                 <button
                                   type="button"
@@ -1122,6 +1290,17 @@ export default function MobileWarehouses() {
                                                                   </button>
                                                                   <button
                                                                     type="button"
+                                                                    className="ml-0.5 flex-shrink-0 hover:text-foreground transition-colors"
+                                                                    onClick={(e) => {
+                                                                      e.stopPropagation()
+                                                                      openMove(inv, l)
+                                                                    }}
+                                                                    title="移动到新库位"
+                                                                  >
+                                                                    <Truck className="h-3 w-3" />
+                                                                  </button>
+                                                                  <button
+                                                                    type="button"
                                                                     className="ml-0.5 flex-shrink-0 hover:text-destructive transition-colors"
                                                                     onClick={(e) => {
                                                                       e.stopPropagation()
@@ -1149,6 +1328,15 @@ export default function MobileWarehouses() {
                                                       )}
                                                     </div>
                                                     <div className="flex gap-0.5 flex-shrink-0">
+                                                      {canWrite() && (
+                                                        <button
+                                                          onClick={() => openAddProd(l)}
+                                                          className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-primary transition-colors"
+                                                          title="添加产品到该库位"
+                                                        >
+                                                          <Plus className="h-3 w-3" />
+                                                        </button>
+                                                      )}
                                                       <button
                                                         onClick={() => openEditLoc(l as Location)}
                                                         className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
@@ -1416,6 +1604,242 @@ export default function MobileWarehouses() {
                   保存
                 </Button>
               </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 功能 A：添加产品到该库位 */}
+      <Dialog open={addProdOpen} onOpenChange={(o) => !o && setAddProdOpen(false)}>
+        <DialogContent className="max-w-md p-0">
+          <DialogHeader className="px-4 pt-4">
+            <DialogTitle>添加产品到库位</DialogTitle>
+            <DialogDescription>
+              {(() => {
+                const l = (locations || []).find((x) => x.id === addProdLocId)
+                return l ? `库位 ${l.code}` : '请选择产品'
+              })()}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 p-4">
+            <div className="space-y-2">
+              <Label>产品 *</Label>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full justify-start"
+                onClick={() => setPickerOpen(true)}
+              >
+                {addProdProductId
+                  ? (() => {
+                      const inv = (locations || [])
+                        .flatMap((l: any) => l.inventory || [])
+                        .find((i: any) => i.product?.id === addProdProductId)
+                      return inv?.product?.name || '已选择产品'
+                    })()
+                  : '点击选择产品'}
+              </Button>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="m-add-prod-qty">数量 *</Label>
+              <Input
+                id="m-add-prod-qty"
+                type="number"
+                min="1"
+                step="1"
+                value={addProdQty}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10)
+                  setAddProdQty(isNaN(v) ? '' : String(v))
+                }}
+                placeholder="请输入整数数量"
+                className="h-10"
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                className="flex-1"
+                onClick={() => setAddProdOpen(false)}
+              >
+                取消
+              </Button>
+              <Button
+                type="button"
+                className="flex-1"
+                disabled={
+                  !addProdLocId ||
+                  !addProdProductId ||
+                  addProdQty === '' ||
+                  Number(addProdQty) < 1 ||
+                  addProdToLoc.isPending
+                }
+                onClick={() => {
+                  if (!addProdLocId || !addProdProductId) return
+                  const qty = parseInt(addProdQty, 10)
+                  if (isNaN(qty) || qty < 1) return
+                  addProdToLoc.mutate({ productId: addProdProductId, locId: addProdLocId, qty })
+                }}
+              >
+                {addProdToLoc.isPending ? '添加中...' : '确认添加'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 功能 A 的产品选择器 */}
+      <ProductPicker
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        onSelect={(p) => setAddProdProductId(p.id)}
+      />
+
+      {/* 功能 B：移动库位库存到新库位 */}
+      <Dialog open={moveOpen} onOpenChange={(o) => !o && setMoveOpen(false)}>
+        <DialogContent className="max-w-md p-0">
+          <DialogHeader className="px-4 pt-4">
+            <DialogTitle>移动到新库位</DialogTitle>
+            <DialogDescription>
+              {moveInv?.product?.name}
+              {moveInv?.location?.code && (
+                <span className="ml-2 text-xs font-mono text-muted-foreground">
+                  当前 {moveInv.location.code} · {moveInv.qty}
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 p-4">
+            <div className="space-y-2">
+              <Label>目标库位 *</Label>
+              {moveTargetLocId ? (
+                <div className="flex items-center gap-2 px-3 py-2.5 rounded-md border border-green-300 bg-green-50 text-sm">
+                  <MapPin className="h-4 w-4 text-green-600 flex-shrink-0" />
+                  <span className="font-medium text-green-800">
+                    {(() => {
+                      const tl = (allLocations || []).find((l: any) => l.id === moveTargetLocId)
+                      const wh = tl?.warehouse?.name || tl?.warehouse?.code || ''
+                      return tl ? `${wh} / ${tl.code}` : ''
+                    })()}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setMoveTargetLocId('')}
+                    className="ml-auto text-green-600 hover:text-green-800 flex-shrink-0"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="relative">
+                    <MapPin className="absolute left-2.5 top-3 h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    <Input
+                      placeholder="搜索仓库 / 库位编码 / 描述..."
+                      value={moveSearch}
+                      onChange={(e) => setMoveSearch(e.target.value)}
+                      className="pl-8 h-11 border-primary/30 focus:border-primary"
+                    />
+                  </div>
+                  {moveFilteredLocs.length > 0 && (
+                    <div className="max-h-64 overflow-y-auto rounded-md border border-input divide-y divide-blue-100">
+                      {moveFilteredLocs.map((l: any) => {
+                        const whName = l.warehouse?.name || l.warehouse?.code || ''
+                        return (
+                          <button
+                            key={l.id}
+                            type="button"
+                            onClick={() => {
+                              setMoveTargetLocId(l.id)
+                              setMoveSearch('')
+                            }}
+                            className="flex w-full items-center justify-between px-3 py-3 text-sm transition-colors border-l-4 border-transparent hover:bg-accent"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <MapPin className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                              <span className="font-medium">{l.code}</span>
+                              <span className="text-xs text-muted-foreground truncate">
+                                {whName}
+                                {l.description ? ` · ${l.description}` : ''}
+                              </span>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                  {moveFilteredLocs.length === 0 && (
+                    <p className="text-xs text-muted-foreground text-center py-2">
+                      {moveSearch ? '无匹配库位' : '暂无可选库位'}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="m-move-qty">移动数量 *</Label>
+              <Input
+                id="m-move-qty"
+                type="number"
+                min="1"
+                max={moveInv?.qty ?? undefined}
+                step="1"
+                value={moveQty}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10)
+                  setMoveQty(isNaN(v) ? '' : String(v))
+                }}
+                placeholder={`1 ~ ${moveInv?.qty ?? ''}`}
+                className="h-10"
+              />
+              {moveInv && (
+                <div className="text-xs text-muted-foreground">
+                  当前库存 {moveInv.qty}，最大可移动 {moveInv.qty}
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                className="flex-1"
+                onClick={() => setMoveOpen(false)}
+              >
+                取消
+              </Button>
+              <Button
+                type="button"
+                className="flex-1"
+                disabled={
+                  !moveInv ||
+                  !moveTargetLocId ||
+                  moveQty === '' ||
+                  Number(moveQty) < 1 ||
+                  Number(moveQty) > (moveInv?.qty ?? 0) ||
+                  moveStock.isPending
+                }
+                onClick={() => {
+                  if (!moveInv || !moveTargetLocId) return
+                  const qty = parseInt(moveQty, 10)
+                  if (isNaN(qty) || qty < 1 || qty > moveInv.qty) {
+                    toast.error(`不能超过当前库存 ${moveInv.qty}`)
+                    return
+                  }
+                  const targetLoc = (allLocations || []).find((l: any) => l.id === moveTargetLocId)
+                  const toLocCode = targetLoc?.code || ''
+                  moveStock.mutate({
+                    productId: moveInv.product?.id,
+                    fromLocId: moveInv.location?.id,
+                    toLocId: moveTargetLocId,
+                    qty,
+                    fromLocCode: moveInv.location?.code || '',
+                    toLocCode,
+                  })
+                }}
+              >
+                {moveStock.isPending ? '移动中...' : '确认移动'}
+              </Button>
             </div>
           </div>
         </DialogContent>

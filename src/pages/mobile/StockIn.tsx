@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -30,6 +30,11 @@ export default function MobileStockIn() {
 
   const [pickerOpen, setPickerOpen] = useState(false)
   const [scannerOpen, setScannerOpen] = useState(false)
+  const [searchParams] = useSearchParams()
+  // 首页"扫码入库"入口带 ?scan=1，自动打开扫码器
+  useEffect(() => {
+    if (searchParams.get('scan') === '1') setScannerOpen(true)
+  }, [searchParams])
   const [product, setProduct] = useState<Product | null>(null)
   const [warehouseId, setWarehouseId] = useState('')
   const [locationId, setLocationId] = useState('')
@@ -422,7 +427,7 @@ export default function MobileStockIn() {
                 min="0"
                 step="1"
                 value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
+                onChange={(e) => { const n = parseInt(e.target.value, 10); setQuantity(isNaN(n) || n < 0 ? '' : String(n)) }}
                 placeholder="请输入入库数量"
                 required
               />
