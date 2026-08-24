@@ -1231,14 +1231,43 @@ export default function MobileProducts() {
         )}
 
         {(sortedProducts?.length || 0) > PAGE_SIZE && (
-          <div className="flex items-center justify-center gap-2 py-3 text-xs">
+          <div className="flex items-center justify-center gap-1 py-3 text-xs flex-wrap">
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(1); scrollTop() }}>
+              首页
+            </Button>
             <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(page - 1); scrollTop() }}>
               上一页
             </Button>
-            <span className="text-muted-foreground">{page}/{totalPages}页·共{sortedProducts?.length}</span>
+            {(() => {
+              const range: (number | string)[] = []
+              if (totalPages <= 7) {
+                for (let i = 1; i <= totalPages; i++) range.push(i)
+              } else {
+                range.push(1)
+                const start = Math.max(2, page - 1)
+                const end = Math.min(totalPages - 1, page + 1)
+                if (start > 2) range.push('...')
+                for (let i = start; i <= end; i++) range.push(i)
+                if (end < totalPages - 1) range.push('...')
+                range.push(totalPages)
+              }
+              return range.map((p, i) =>
+                typeof p === 'number' ? (
+                  <Button key={i} variant={p === page ? 'default' : 'outline'} size="sm" onClick={() => { setPage(p); scrollTop() }}>
+                    {p}
+                  </Button>
+                ) : (
+                  <span key={i} className="px-1 text-muted-foreground">…</span>
+                ),
+              )
+            })()}
             <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(page + 1); scrollTop() }}>
               下一页
             </Button>
+            <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(totalPages); scrollTop() }}>
+              末页
+            </Button>
+            <span className="text-muted-foreground ml-1">{page}/{totalPages}页·共{sortedProducts?.length}</span>
           </div>
         )}
       </div>
@@ -1497,10 +1526,10 @@ export default function MobileProducts() {
                     <div className="space-y-1.5 rounded-md border p-2">
                       {productInventory.map((inv: any) => (
                         <div key={inv.id} className="flex items-center gap-1.5">
-                          <span className="font-mono text-[10px] bg-muted px-1.5 py-1 rounded flex-shrink-0">
+                          <span className="font-mono text-sm font-semibold bg-blue-50 text-blue-700 px-1.5 py-1 rounded flex-shrink-0">
                             {inv.location?.code || '-'}
                           </span>
-                          <span className="text-[10px] text-muted-foreground flex-shrink-0 truncate flex-1 min-w-0">
+                          <span className="text-xs text-muted-foreground flex-shrink-0 truncate flex-1 min-w-0">
                             {inv.location?.warehouse?.name || inv.location?.warehouse?.code || ''}
                           </span>
                           <input

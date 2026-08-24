@@ -79,7 +79,7 @@ export default function MobileStockIn() {
   const { data: warehouses } = useQuery({
     queryKey: ['warehouses'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('warehouses').select('*').order('name')
+      const { data, error } = await supabase.from('warehouses').select('*').order('sort_order', { ascending: false, nullsFirst: false }).order('name')
       if (error) throw error
       return data
     },

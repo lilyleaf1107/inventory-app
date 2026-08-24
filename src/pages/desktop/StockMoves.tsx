@@ -109,7 +109,7 @@ export default function StockMovesPage() {
       m.move_type === 'in' ? '入库' : '出库',
       m.product.name,
       m.product.sku || '-',
-      m.quantity,
+      Number(m.quantity),
       m.product.unit,
       m.location.warehouse.name || m.location.warehouse.code,
       m.location.code,
@@ -301,7 +301,7 @@ export default function StockMovesPage() {
                       }`}
                     >
                       {m.move_type === 'in' ? '+' : '-'}
-                      {m.quantity}
+                      {Number(m.quantity)}
                     </span>
                     <span className="text-xs text-muted-foreground ml-1">
                       {m.product.unit}

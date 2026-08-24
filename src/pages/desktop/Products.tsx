@@ -1,4 +1,4 @@
-import { useState, useMemo, useDeferredValue, useEffect } from 'react'
+import { useState, useMemo, useDeferredValue, useEffect, useLayoutEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -16,8 +16,6 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
-  TableHeader,
   TableRow,
 } from '@/components/ui/table'
 import {
@@ -926,87 +924,130 @@ export default function ProductsPage() {
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
 
+  const colgroupRef = useRef<HTMLTableColElement>(null)
+  const [colWidths, setColWidths] = useState<number[]>([])
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      if (colgroupRef.current) {
+        const cols = Array.from(colgroupRef.current.children) as HTMLElement[]
+        setColWidths(cols.map((c) => c.getBoundingClientRect().width))
+      }
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [products?.length, canViewCost])
+
+  const headerCols = [
+    { label: '图片', w: 80 },
+    { label: 'SKU', w: 0 },
+    { label: '名称', w: 0 },
+    { label: '条形码', w: 0 },
+    { label: '分类', w: 0 },
+    { label: '标签', w: 0 },
+    { label: '规格', w: 0 },
+    ...(canViewCost() ? [{ label: '成本', w: 0 }] : []),
+    { label: '当前库存', w: 0 },
+    { label: '库位', w: 0 },
+    { label: '上架状态', w: 0 },
+    { label: '操作', w: 96 },
+  ]
+
   return (
     <div className="space-y-4">
-      <div className="sticky top-0 z-20 bg-background py-2 -mx-1 px-1 flex items-center justify-between border-b shadow-sm">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">产品管理</h2>
-          <p className="text-sm text-muted-foreground">管理所有产品信息和图片</p>
+      <div className="sticky top-0 z-30 bg-background border-b shadow-sm space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-bold tracking-tight">产品管理</h2>
+            <p className="text-sm text-muted-foreground">管理所有产品信息和图片</p>
+          </div>
+          {canWrite() && (
+            <Button onClick={openCreate}>
+              <Plus className="mr-2 h-4 w-4" />
+              新增产品
+            </Button>
+          )}
         </div>
-        {canWrite() && (
-          <Button onClick={openCreate}>
-            <Plus className="mr-2 h-4 w-4" />
-            新增产品
-          </Button>
-        )}
-      </div>
 
-      <div className="flex items-center gap-2 flex-wrap">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="搜索名称 / SKU / 条形码 / 分类"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-8"
-          />
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="搜索名称 / SKU / 条形码 / 分类"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-8"
+            />
+          </div>
+          <div className="w-40">
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <option value="">全部分类</option>
+              {categories?.map((c) => (
+                <option key={c.id} value={c.name}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
-        <div className="w-40">
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          >
-            <option value="">全部分类</option>
-            {categories?.map((c) => (
-              <option key={c.id} value={c.name}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
 
-      <div className="flex items-center gap-2 flex-wrap">
-        <div className="flex items-center gap-1 text-sm text-muted-foreground">
-          <Tag className="h-3.5 w-3.5" />
-          标签筛选：
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1 text-sm text-muted-foreground">
+            <Tag className="h-3.5 w-3.5" />
+            标签筛选：
+          </div>
+          {tags?.map((tag, index) => (
+            <button
+              key={tag.id}
+              onClick={() => toggleTagFilter(tag.id)}
+              className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${selectedTagFilter.includes(tag.id) ? 'ring-2 ring-offset-1 ring-primary' : ''} ${getTagColor(index)}`}
+            >
+              {tag.name}
+            </button>
+          ))}
+          {selectedTagFilter.length > 0 && (
+            <Button variant="ghost" size="sm" onClick={clearTagFilter} className="h-6 px-2 text-xs">
+              <X className="h-3 w-3 mr-1" />
+              清除
+            </Button>
+          )}
         </div>
-        {tags?.map((tag, index) => (
-          <button
-            key={tag.id}
-            onClick={() => toggleTagFilter(tag.id)}
-            className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${selectedTagFilter.includes(tag.id) ? 'ring-2 ring-offset-1 ring-primary' : ''} ${getTagColor(index)}`}
-          >
-            {tag.name}
-          </button>
-        ))}
-        {selectedTagFilter.length > 0 && (
-          <Button variant="ghost" size="sm" onClick={clearTagFilter} className="h-6 px-2 text-xs">
-            <X className="h-3 w-3 mr-1" />
-            清除
-          </Button>
-        )}
+
+        {/* 表头行 - 与下方表格列宽对齐 */}
+        <div className="flex items-center border-t border-b bg-muted/50">
+          {headerCols.map((col, i) => (
+            <div
+              key={i}
+              className={`px-4 py-3 text-left align-middle font-medium text-muted-foreground text-sm ${col.label === '操作' ? 'text-right' : ''}`}
+              style={{ width: colWidths[i] || col.w || 'auto' }}
+            >
+              {col.label}
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="rounded-md border bg-background">
         <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-20">图片</TableHead>
-              <TableHead>SKU</TableHead>
-              <TableHead>名称</TableHead>
-              <TableHead>条形码</TableHead>
-              <TableHead>分类</TableHead>
-              <TableHead>标签</TableHead>
-              <TableHead>规格</TableHead>
-              {canViewCost() && <TableHead>成本</TableHead>}
-              <TableHead>当前库存</TableHead>
-              <TableHead>库位</TableHead>
-              <TableHead>上架状态</TableHead>
-              <TableHead className="w-24 text-right">操作</TableHead>
-            </TableRow>
-          </TableHeader>
+          <colgroup ref={colgroupRef}>
+            <col className="w-20" />
+            <col />
+            <col />
+            <col />
+            <col />
+            <col />
+            <col />
+            {canViewCost() && <col />}
+            <col />
+            <col />
+            <col />
+            <col className="w-24" />
+          </colgroup>
           <TableBody>
             {isLoading ? (
               <TableRow>
@@ -1299,14 +1340,43 @@ export default function ProductsPage() {
       </div>
 
       {(sortedProducts?.length || 0) > PAGE_SIZE && (
-        <div className="flex items-center justify-center gap-3 py-2 text-sm">
+        <div className="flex items-center justify-center gap-1 py-2 text-sm flex-wrap">
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+            首页
+          </Button>
           <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(page - 1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
             上一页
           </Button>
-          <span className="text-muted-foreground">第 {page} / {totalPages} 页 · 共 {sortedProducts?.length} 个</span>
+          {(() => {
+            const range: (number | string)[] = []
+            if (totalPages <= 7) {
+              for (let i = 1; i <= totalPages; i++) range.push(i)
+            } else {
+              range.push(1)
+              const start = Math.max(2, page - 1)
+              const end = Math.min(totalPages - 1, page + 1)
+              if (start > 2) range.push('...')
+              for (let i = start; i <= end; i++) range.push(i)
+              if (end < totalPages - 1) range.push('...')
+              range.push(totalPages)
+            }
+            return range.map((p, i) =>
+              typeof p === 'number' ? (
+                <Button key={i} variant={p === page ? 'default' : 'outline'} size="sm" onClick={() => { setPage(p); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+                  {p}
+                </Button>
+              ) : (
+                <span key={i} className="px-1 text-muted-foreground">…</span>
+              ),
+            )
+          })()}
           <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(page + 1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
             下一页
           </Button>
+          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(totalPages); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+            末页
+          </Button>
+          <span className="text-muted-foreground ml-2">第 {page}/{totalPages} 页 · 共 {sortedProducts?.length} 个</span>
         </div>
       )}
 
@@ -1545,7 +1615,7 @@ export default function ProductsPage() {
                     <div className="space-y-1.5 rounded-md border p-3">
                       {productInventory.map((inv: any) => (
                         <div key={inv.id} className="flex items-center gap-2">
-                          <span className="font-mono text-xs bg-muted px-2 py-1 rounded flex-shrink-0">
+                          <span className="font-mono text-sm font-semibold bg-blue-50 text-blue-700 px-2 py-1 rounded flex-shrink-0">
                             {inv.location?.code || '-'}
                           </span>
                           <span className="text-xs text-muted-foreground flex-shrink-0">

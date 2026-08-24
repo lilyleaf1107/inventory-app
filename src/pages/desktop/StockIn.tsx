@@ -96,11 +96,19 @@ export default function StockInPage() {
       const { data, error } = await supabase
         .from('warehouses')
         .select('*')
+        .order('sort_order', { ascending: false, nullsFirst: false })
         .order('name')
       if (error) throw error
       return data
     },
   })
+
+  // 默认选最常用仓库（置顶 sort_order 最高的）
+  useEffect(() => {
+    if (!warehouseId && warehouses && warehouses.length > 0) {
+      setWarehouseId(warehouses[0].id)
+    }
+  }, [warehouses, warehouseId])
 
   const { data: locations } = useQuery({
     queryKey: ['locations', warehouseId],

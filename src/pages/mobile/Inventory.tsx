@@ -16,6 +16,7 @@ import { supabase, getProductImageUrl } from '@/lib/supabase'
 import { useOutOfStock } from '@/hooks/useOutOfStock'
 import { getLowStockLevel, getLowStockLevelColor } from '@/hooks/useLowStock'
 import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import type { Warehouse as WarehouseType, Category } from '@/types'
 
@@ -154,6 +155,15 @@ export default function MobileInventory() {
   }, [inventory])
 
   const filterActive = !!warehouseId || !!categoryId
+
+  const PAGE_SIZE = 30
+  const [page, setPage] = useState(1)
+  useEffect(() => { setPage(1) }, [search, warehouseId, categoryId])
+  const totalPages = Math.max(1, Math.ceil((inventory?.length || 0) / PAGE_SIZE))
+  const pagedInventory = useMemo(
+    () => inventory?.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [inventory, page],
+  )
 
   const [showTop, setShowTop] = useState(false)
   useEffect(() => {
@@ -305,7 +315,7 @@ export default function MobileInventory() {
         <div className="text-center py-12 text-muted-foreground text-sm">暂无库存</div>
       ) : (
         <div className="space-y-2">
-          {inventory?.map((item) => {
+          {pagedInventory?.map((item) => {
             const isOutOfStock = item.quantity === 0
             const isMaterial = item.product.is_material_area
             const lowStockLevel = getLowStockLevel(item.quantity)
@@ -352,10 +362,13 @@ export default function MobileInventory() {
                       </span>
                     )}
                   </div>
-                  <div className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                    <MapPin className="h-3 w-3" />
-                    {item.location.warehouse?.name || item.location.warehouse?.code || ''} ·{' '}
-                    {item.location.code}
+                  <div className="mt-0.5">
+                    <div className="font-mono text-sm font-bold text-foreground">
+                      {item.location.code}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {item.location.warehouse?.name || item.location.warehouse?.code || ''}
+                    </div>
                   </div>
                   {item.product.sku && (
                     <div className="text-[10px] text-muted-foreground mt-0.5">
@@ -378,6 +391,47 @@ export default function MobileInventory() {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {(inventory?.length || 0) > PAGE_SIZE && (
+        <div className="flex items-center justify-center gap-1 py-3 text-xs flex-wrap">
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+            首页
+          </Button>
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(page - 1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+            上一页
+          </Button>
+          {(() => {
+            const range: (number | string)[] = []
+            if (totalPages <= 7) {
+              for (let i = 1; i <= totalPages; i++) range.push(i)
+            } else {
+              range.push(1)
+              const start = Math.max(2, page - 1)
+              const end = Math.min(totalPages - 1, page + 1)
+              if (start > 2) range.push('...')
+              for (let i = start; i <= end; i++) range.push(i)
+              if (end < totalPages - 1) range.push('...')
+              range.push(totalPages)
+            }
+            return range.map((p, i) =>
+              typeof p === 'number' ? (
+                <Button key={i} variant={p === page ? 'default' : 'outline'} size="sm" onClick={() => { setPage(p); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+                  {p}
+                </Button>
+              ) : (
+                <span key={i} className="px-1 text-muted-foreground">…</span>
+              ),
+            )
+          })()}
+          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(page + 1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+            下一页
+          </Button>
+          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(totalPages); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+            末页
+          </Button>
+          <span className="text-muted-foreground ml-1">{page}/{totalPages}页·共{inventory?.length}</span>
         </div>
       )}
     </div>
