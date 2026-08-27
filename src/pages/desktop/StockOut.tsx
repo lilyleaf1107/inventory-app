@@ -100,9 +100,13 @@ export default function StockOutPage() {
         p = (data as Product) || undefined
       }
       if (!p) {
+        setProduct(null)
         toast.warning(`未找到「${barcode}」对应产品`)
         return
       }
+      // 先显示产品，让用户看到扫到的是什么
+      setProduct(p)
+      setScanMode(true)
       // 2. 查最近入库库位（按 updated_at 降序取第一条）
       const { data: inv, error: invErr } = await supabase
         .from('inventory')
@@ -117,6 +121,7 @@ export default function StockOutPage() {
         return
       }
       const target = inv[0] as any
+      setLocationId(target.location_id)
       // 3. 调用出库 RPC（参数名与 handleSubmit 保持一致）
       const { error: rpcErr } = await supabase.rpc('stock_out', {
         p_product_id: p.id,
@@ -128,7 +133,7 @@ export default function StockOutPage() {
         p_operator_id: user?.id || null,
       })
       if (rpcErr) throw rpcErr
-      toast.success(`已出库 1 个：${p.name}（${target.location?.warehouse?.name || ''} / ${target.location?.code}）`)
+      toast.success(`已出库 1 个：${p.name}（${target.location?.warehouse?.name || target.location?.warehouse?.code || ''} / ${target.location?.code}）`)
       queryClient.invalidateQueries({ queryKey: ['product-inventory'] })
       queryClient.invalidateQueries({ queryKey: ['inventory'] })
       queryClient.invalidateQueries({ queryKey: ['products'] })
@@ -279,7 +284,8 @@ export default function StockOutPage() {
                 <Button
                   type="button"
                   variant={quickMode ? 'default' : 'outline'}
-                  onClick={() => {
+                  onClick={(e) => {
+                    (e.currentTarget as HTMLButtonElement).blur()
                     const v = !quickMode
                     setQuickMode(v)
                     if (v) {
