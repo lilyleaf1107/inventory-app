@@ -8,7 +8,6 @@ import {
   AlertTriangle,
   ImagePlus,
   ScanLine,
-  Camera,
   X,
   Zap,
 } from 'lucide-react'
@@ -29,7 +28,6 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import ProductPicker from '@/components/ProductPicker'
-import Scanner from '@/components/Scanner'
 
 export default function StockOutPage() {
   const queryClient = useQueryClient()
@@ -37,7 +35,6 @@ export default function StockOutPage() {
   const { isMobile } = useDevice()
 
   const [pickerOpen, setPickerOpen] = useState(false)
-  const [scannerOpen, setScannerOpen] = useState(false)
   const [product, setProduct] = useState<Product | null>(null)
   const [locationId, setLocationId] = useState('')
   const [locSearch, setLocSearch] = useState('')
@@ -89,7 +86,6 @@ export default function StockOutPage() {
 
   // 快速出库：扫码即出 1 个，自动选最近库位，连续扫码
   const quickStockOut = useCallback(async (barcode: string) => {
-    setScannerOpen(false)
     try {
       // 1. 识别产品：优先本地缓存匹配 barcode/sku，未命中走网络
       const cached = queryClient.getQueryData<Product[]>(['products', ''])
@@ -138,8 +134,6 @@ export default function StockOutPage() {
       queryClient.invalidateQueries({ queryKey: ['products'] })
     } catch (err: any) {
       toast.error(err.message || '快速出库失败')
-    } finally {
-      if (quickMode) setScannerOpen(true)
     }
   }, [queryClient, user, quickMode])
 
@@ -248,11 +242,6 @@ export default function StockOutPage() {
     setQuantity('1')
   }
 
-  const handleScannerResult = (code: string) => {
-    setScannerOpen(false)
-    findProductByBarcode(code)
-  }
-
   const qtyNum = parseFloat(quantity) || 0
   const isOverStock = locationId && qtyNum > selectedLocationQty
 
@@ -294,11 +283,8 @@ export default function StockOutPage() {
                     const v = !quickMode
                     setQuickMode(v)
                     if (v) {
-                      setScannerOpen(true)
                       setProduct(null)
                       setQuantity('')
-                    } else {
-                      setScannerOpen(false)
                     }
                   }}
                 >
@@ -307,7 +293,7 @@ export default function StockOutPage() {
                 </Button>
                 {quickMode && (
                   <div className="text-xs text-blue-600 bg-blue-50 rounded p-2">
-                    快速出库：扫码即出 1 个，自动选最近库位，连续扫码
+                    快速出库已开启：用扫码枪扫码即出 1 个，自动选最近库位，连续扫码
                   </div>
                 )}
                 {/* 产品选择 */}
@@ -376,15 +362,10 @@ export default function StockOutPage() {
                         <Package className="mr-2 h-4 w-4" />
                         手动选择
                       </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="flex-1 h-20 border-dashed"
-                        onClick={() => setScannerOpen(true)}
-                      >
-                        <Camera className="mr-2 h-4 w-4" />
-                        扫码选择
-                      </Button>
+                      <div className="flex-1 h-20 border border-dashed rounded-md flex items-center justify-center text-sm text-muted-foreground">
+                        <ScanLine className="mr-2 h-4 w-4" />
+                        扫码枪已就绪，直接扫码即可
+                      </div>
                     </div>
                   )}
                   {searchingBarcode && (
@@ -601,11 +582,6 @@ export default function StockOutPage() {
         onSelect={handleManualSelect}
       />
 
-      <Scanner
-        open={scannerOpen}
-        onClose={() => setScannerOpen(false)}
-        onScan={quickMode ? quickStockOut : handleScannerResult}
-      />
     </div>
   )
 }

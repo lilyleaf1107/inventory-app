@@ -7,7 +7,6 @@ import {
   MapPin,
   ImagePlus,
   ScanLine,
-  Camera,
   X,
   AlertCircle,
 } from 'lucide-react'
@@ -28,7 +27,6 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import ProductPicker from '@/components/ProductPicker'
-import Scanner from '@/components/Scanner'
 
 export default function StockInPage() {
   const queryClient = useQueryClient()
@@ -36,7 +34,6 @@ export default function StockInPage() {
   const { isMobile } = useDevice()
 
   const [pickerOpen, setPickerOpen] = useState(false)
-  const [scannerOpen, setScannerOpen] = useState(false)
   const [product, setProduct] = useState<Product | null>(null)
   const [warehouseId, setWarehouseId] = useState('')
   const [locationId, setLocationId] = useState('')
@@ -206,11 +203,6 @@ export default function StockInPage() {
     setScanMode(false)
   }
 
-  const handleScannerResult = (code: string) => {
-    setScannerOpen(false)
-    findProductByBarcode(code)
-  }
-
   // 产品变化时：查询该产品最近一次 inventory 记录，保存目标库位到状态
   const [pendingLocationId, setPendingLocationId] = useState<string>('')
 
@@ -357,15 +349,10 @@ export default function StockInPage() {
                         <Package className="mr-2 h-4 w-4" />
                         手动选择
                       </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="flex-1 h-20 border-dashed"
-                        onClick={() => setScannerOpen(true)}
-                      >
-                        <Camera className="mr-2 h-4 w-4" />
-                        扫码选择
-                      </Button>
+                      <div className="flex-1 h-20 border border-dashed rounded-md flex items-center justify-center text-sm text-muted-foreground">
+                        <ScanLine className="mr-2 h-4 w-4" />
+                        扫码枪已就绪，直接扫码即可
+                      </div>
                     </div>
                   )}
                   {searchingBarcode && (
@@ -582,12 +569,6 @@ export default function StockInPage() {
         open={pickerOpen}
         onOpenChange={setPickerOpen}
         onSelect={handleManualSelect}
-      />
-
-      <Scanner
-        open={scannerOpen}
-        onClose={() => setScannerOpen(false)}
-        onScan={handleScannerResult}
       />
     </div>
   )

@@ -293,8 +293,7 @@ export default function MobileStockIn() {
                 <div className="grid grid-cols-2 gap-2">
                   <Button
                     type="button"
-                    variant="outline"
-                    className="h-16 border-dashed flex-col gap-1"
+                    className="h-16 flex-col gap-1"
                     onClick={() => setPickerOpen(true)}
                   >
                     <Package className="h-4 w-4" />
