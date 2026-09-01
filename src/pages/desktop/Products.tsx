@@ -1,12 +1,13 @@
+import { scrollToTopOfPage } from '@/lib/utils'
 import { useState, useMemo, useDeferredValue, useEffect, useLayoutEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Search, Edit2, Trash2, ImagePlus, X, Tag, MapPin, Package, ArrowUp } from 'lucide-react'
+import { Plus, Search, Edit2, Trash2, ImagePlus, X, Tag, MapPin, Package } from 'lucide-react'
 import { supabase, getProductImageUrl, uploadProductImage, deleteProductImage } from '@/lib/supabase'
 import type { Product, Category as CategoryType, Tag as TagType } from '@/types'
 import { useAuthStore } from '@/store/auth'
-import { getLowStockLevel, getLowStockLevelColor } from '@/hooks/useLowStock'
+import { calcStockAlert, getLowStockLevelColor, useSalesVelocity30d, formatSellableDays } from '@/hooks/useLowStock'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -105,6 +106,9 @@ export default function ProductsPage() {
   // 暂未入仓数量内联编辑
   const [editUnallocProductId, setEditUnallocProductId] = useState<string | null>(null)
   const [editUnallocQty, setEditUnallocQty] = useState('')
+
+  // 方案A：每个产品 30 天出库量（用于按"能卖天数"预警）
+  const { data: velocityMap } = useSalesVelocity30d()
 
   const { data: categories } = useQuery({
     queryKey: ['categories'],
@@ -893,7 +897,6 @@ export default function ProductsPage() {
   // 产品列表按库位顺序排列：先按仓库名/编码，再按库位编码
   const PAGE_SIZE = 30
   const [page, setPage] = useState(1)
-  const [showTop, setShowTop] = useState(false)
 
   // 排序：无 SKU 在最前，其他按 SKU 升序（数字段自然排序）
   const sortedProducts = useMemo(() => {
@@ -917,12 +920,6 @@ export default function ProductsPage() {
     () => sortedProducts?.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
     [sortedProducts, page],
   )
-
-  useEffect(() => {
-    const onScroll = () => setShowTop(window.scrollY > 300)
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => window.removeEventListener('scroll', onScroll)
-  }, [])
 
   const colgroupRef = useRef<HTMLTableColElement>(null)
   const [colWidths, setColWidths] = useState<number[]>([])
@@ -1066,7 +1063,9 @@ export default function ProductsPage() {
                 const productTags = getProductTags(p)
                 const totalQty = productQtyMap?.get(p.id) || 0
                 const isOutOfStock = totalQty === 0
-                const lowStockLevel = getLowStockLevel(totalQty)
+                const out30d = velocityMap?.get(p.id) || 0
+                const alert = calcStockAlert(totalQty, out30d)
+                const lowStockLevel = alert.level
                 const lowStockColor = getLowStockLevelColor(lowStockLevel)
                 const hasLowStock = lowStockLevel !== 'normal' && !isOutOfStock
                 const locations = productLocationsMap?.get(p.id) || []
@@ -1099,8 +1098,9 @@ export default function ProductsPage() {
                         </span>
                         )}
                         {hasLowStock && (
-                          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${lowStockColor.border} ${lowStockColor.text} ${lowStockColor.bg}`}>
+                          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${lowStockColor.border} ${lowStockColor.text} ${lowStockColor.bg}`} title={formatSellableDays(alert.sellableDays, alert.usesFallback)}>
                             {lowStockColor.label}
+                            {!alert.usesFallback && alert.sellableDays != null && ` (${alert.sellableDays.toFixed(1)}天)`}
                           </span>
                         )}
                       </div>
@@ -1341,28 +1341,31 @@ export default function ProductsPage() {
 
       {(sortedProducts?.length || 0) > PAGE_SIZE && (
         <div className="flex items-center justify-center gap-1 py-2 text-sm flex-wrap">
-          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(1); scrollToTopOfPage() }}>
             首页
           </Button>
-          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(page - 1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(page - 1); scrollToTopOfPage() }}>
             上一页
           </Button>
           {(() => {
             const range: (number | string)[] = []
-            if (totalPages <= 7) {
+            // 🆕 展开规则：≤11 页全部直接显示；>11 页就以当前页为中心 ±4（中间一共 9 页）
+            const FULL_SHOW_MAX = 11
+            const SIDE = 4
+            if (totalPages <= FULL_SHOW_MAX) {
               for (let i = 1; i <= totalPages; i++) range.push(i)
             } else {
               range.push(1)
-              const start = Math.max(2, page - 1)
-              const end = Math.min(totalPages - 1, page + 1)
-              if (start > 2) range.push('...')
-              for (let i = start; i <= end; i++) range.push(i)
-              if (end < totalPages - 1) range.push('...')
+              const centerStart = Math.max(2, page - SIDE)
+              const centerEnd   = Math.min(totalPages - 1, page + SIDE)
+              if (centerStart > 2) range.push('...')
+              for (let i = centerStart; i <= centerEnd; i++) range.push(i)
+              if (centerEnd < totalPages - 1) range.push('...')
               range.push(totalPages)
             }
             return range.map((p, i) =>
               typeof p === 'number' ? (
-                <Button key={i} variant={p === page ? 'default' : 'outline'} size="sm" onClick={() => { setPage(p); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+                <Button key={i} variant={p === page ? 'default' : 'outline'} size="sm" onClick={() => { setPage(p); scrollToTopOfPage() }}>
                   {p}
                 </Button>
               ) : (
@@ -1370,25 +1373,16 @@ export default function ProductsPage() {
               ),
             )
           })()}
-          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(page + 1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(page + 1); scrollToTopOfPage() }}>
             下一页
           </Button>
-          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(totalPages); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(totalPages); scrollToTopOfPage() }}>
             末页
           </Button>
           <span className="text-muted-foreground ml-2">第 {page}/{totalPages} 页 · 共 {sortedProducts?.length} 个</span>
         </div>
       )}
 
-      {showTop && (
-        <button
-          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-          className="fixed bottom-6 right-6 z-30 h-11 w-11 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center hover:opacity-90"
-          aria-label="返回顶部"
-        >
-          <ArrowUp className="h-5 w-5" />
-        </button>
-      )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">

@@ -1,23 +1,47 @@
-import { useMemo } from 'react'
-import { AlertTriangle, Package, MapPin } from 'lucide-react'
-import { useLowStock, getLowStockLevel, getLowStockLevelColor, LOW_STOCK_THRESHOLD_WARNING } from '@/hooks/useLowStock'
+import { useMemo, useState } from 'react'
+import { AlertTriangle, Package, MapPin, TrendingDown, HelpCircle } from 'lucide-react'
+import {
+  useLowStock,
+  getLowStockLevelV2,
+  getLowStockLevelColor,
+  formatSellableDays,
+  DAYS_THRESHOLD_WARNING,
+  DAYS_THRESHOLD_DANGER,
+  DAYS_THRESHOLD_CRITICAL,
+  calcStockAlert,
+} from '@/hooks/useLowStock'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { getProductImageUrl } from '@/lib/supabase'
 import { ImagePlus } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { buildPageRange, scrollToTopOfPage } from '@/lib/utils'
+
+const PAGE_SIZE = 20
 
 export default function LowStockPage() {
   const { data: lowStockItems, isLoading } = useLowStock()
+  const [page, setPage] = useState(1)
+
+  const total = lowStockItems?.length || 0
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  // 筛选/数据变化时，重置回第 1 页
+  useMemo(() => { setPage(1) }, [total])
+
+  const pagedList = useMemo(
+    () => (lowStockItems || []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [lowStockItems, page],
+  )
 
   const stats = useMemo(() => {
     if (!lowStockItems) return { total: 0, warning: 0, danger: 0, critical: 0 }
     return {
       total: lowStockItems.length,
-      warning: lowStockItems.filter((i) => getLowStockLevel(i.quantity) === 'warning').length,
-      danger: lowStockItems.filter((i) => getLowStockLevel(i.quantity) === 'danger').length,
-      critical: lowStockItems.filter((i) => getLowStockLevel(i.quantity) === 'critical').length,
+      warning: lowStockItems.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d) === 'warning').length,
+      danger: lowStockItems.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d) === 'danger').length,
+      critical: lowStockItems.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d) === 'critical').length,
     }
   }, [lowStockItems])
 
@@ -27,9 +51,18 @@ export default function LowStockPage() {
         <div>
           <h2 className="text-2xl font-bold tracking-tight text-orange-600 flex items-center gap-2">
             <AlertTriangle className="h-6 w-6" />
-            低库存预警
+            库存预警
           </h2>
-          <p className="text-sm text-muted-foreground">库存 ≤ {LOW_STOCK_THRESHOLD_WARNING} 的商品（≤30黄色 / ≤15橙色 / ≤5红色）</p>
+          <p className="text-sm text-muted-foreground flex items-center gap-2">
+            按「能卖天数」分级（30天有出库记录生效）：
+            <span className="text-red-600 font-medium">≤{DAYS_THRESHOLD_CRITICAL}天🔴</span>
+            <span className="text-orange-600 font-medium">≤{DAYS_THRESHOLD_DANGER}天🟠</span>
+            <span className="text-yellow-600 font-medium">≤{DAYS_THRESHOLD_WARNING}天🟡</span>
+            <span className="flex items-center gap-1 text-muted-foreground">
+              <HelpCircle className="h-3 w-3" />
+              新品/无出库记录：回退至固定数量阈值(≤30/≤15/≤5)
+            </span>
+          </p>
         </div>
       </div>
 
@@ -48,7 +81,9 @@ export default function LowStockPage() {
         </Card>
         <Card className="border-yellow-200">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">黄色预警 (≤30)</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              🟡 黄色预警（≤{DAYS_THRESHOLD_WARNING} 天）
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-yellow-600">{stats.warning}</div>
@@ -56,7 +91,9 @@ export default function LowStockPage() {
         </Card>
         <Card className="border-orange-200">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">橙色预警 (≤15)</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              🟠 橙色预警（≤{DAYS_THRESHOLD_DANGER} 天）
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-orange-600">{stats.danger}</div>
@@ -64,7 +101,9 @@ export default function LowStockPage() {
         </Card>
         <Card className="border-red-200">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">红色预警 (≤5)</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              🔴 红色预警（≤{DAYS_THRESHOLD_CRITICAL} 天）
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-red-600">{stats.critical}</div>
@@ -82,29 +121,38 @@ export default function LowStockPage() {
               <TableHead>SKU / 条码</TableHead>
               <TableHead>仓库 / 库位</TableHead>
               <TableHead>当前库存</TableHead>
-              <TableHead>库存占比</TableHead>
+              <TableHead>30天出库 / 日均</TableHead>
+              <TableHead>能卖天数</TableHead>
               <TableHead>预警等级</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                   加载中...
                 </TableCell>
               </TableRow>
             ) : (lowStockItems ?? []).length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                  暂无低库存预警商品
+                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                  🎉 暂无库存预警商品
                 </TableCell>
               </TableRow>
             ) : (
-              (lowStockItems ?? []).map((item) => {
-                const level = getLowStockLevel(item.quantity)
+              pagedList.map((item) => {
+                const level = getLowStockLevelV2(item.quantity, item.outQty30d)
                 const color = getLowStockLevelColor(level)
+                const alert = calcStockAlert(item.quantity, item.outQty30d)
                 const isMaterial = item.product.is_material_area
-                const ratioPercent = Math.min((item.quantity / LOW_STOCK_THRESHOLD_WARNING) * 100, 100)
+                const sellableDaysText = formatSellableDays(alert.sellableDays, alert.usesFallback)
+
+                // 能卖天数 进度条：15天以内按比例显示（>15 显示100%绿，但这些不会进列表）
+                const days = alert.sellableDays
+                const ratioPercent = days == null
+                  ? Math.min((item.quantity / DAYS_THRESHOLD_WARNING) * 100, 100) // 回退模式下按数量/30 比例
+                  : Math.min((days / DAYS_THRESHOLD_WARNING) * 100, 100)
+
                 return (
                   <TableRow key={item.id} className={color.bg}>
                     <TableCell>
@@ -125,6 +173,11 @@ export default function LowStockPage() {
                         {item.product.name}
                         {isMaterial && (
                           <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-blue-100 text-blue-700">物料</span>
+                        )}
+                        {alert.usesFallback && (
+                          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-100 text-slate-600 border border-slate-200" title="暂无销售数据，使用固定阈值兜底">
+                            固定阈值
+                          </span>
                         )}
                       </div>
                     </TableCell>
@@ -149,19 +202,35 @@ export default function LowStockPage() {
                       {isMaterial ? '***' : `${item.quantity} ${item.product.unit}`}
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div className="w-20 h-2 bg-muted rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full ${
-                              level === 'critical' ? 'bg-red-500' :
-                              level === 'danger' ? 'bg-orange-500' : 'bg-yellow-500'
-                            }`}
-                            style={{ width: `${ratioPercent}%` }}
-                          />
+                      <div className="text-sm space-y-0.5">
+                        <div className="flex items-center gap-1">
+                          <TrendingDown className="h-3 w-3 text-orange-500" />
+                          <span>{item.outQty30d ?? 0} {item.product.unit}（30天）</span>
                         </div>
-                        <span className="text-xs text-muted-foreground">
-                          {ratioPercent.toFixed(0)}%
-                        </span>
+                        <div className="text-xs text-muted-foreground">
+                          日均：{alert.dailyAvg > 0 ? `${alert.dailyAvg.toFixed(2)} ${item.product.unit}/天` : '—'}
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="space-y-1">
+                        <div className={`text-sm font-semibold ${color.text}`}>
+                          {sellableDaysText}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-20 h-2 bg-muted rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${
+                                level === 'critical' ? 'bg-red-500' :
+                                level === 'danger' ? 'bg-orange-500' : 'bg-yellow-500'
+                              }`}
+                              style={{ width: `${ratioPercent}%` }}
+                            />
+                          </div>
+                          {alert.usesFallback && (
+                            <span className="text-[10px] text-slate-500">固定</span>
+                          )}
+                        </div>
                       </div>
                     </TableCell>
                     <TableCell>
@@ -176,6 +245,35 @@ export default function LowStockPage() {
           </TableBody>
         </Table>
       </div>
+
+      {/* 🆕 页码条（宽展开）：超过 1 页才显示 */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-1 py-2 text-sm flex-wrap">
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(1); scrollToTopOfPage() }}>
+            首页
+          </Button>
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(page - 1); scrollToTopOfPage() }}>
+            上一页
+          </Button>
+          {buildPageRange(page, totalPages).map((p, i) =>
+            typeof p === 'number' ? (
+              <Button key={i} variant={p === page ? 'default' : 'outline'} size="sm"
+                onClick={() => { setPage(p); scrollToTopOfPage() }}>
+                {p}
+              </Button>
+            ) : (
+              <span key={i} className="px-1 text-muted-foreground">…</span>
+            ),
+          )}
+          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(page + 1); scrollToTopOfPage() }}>
+            下一页
+          </Button>
+          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(totalPages); scrollToTopOfPage() }}>
+            末页
+          </Button>
+          <span className="text-muted-foreground ml-2">第 {page}/{totalPages} 页 · 共 {total} 条预警</span>
+        </div>
+      )}
     </div>
   )
 }

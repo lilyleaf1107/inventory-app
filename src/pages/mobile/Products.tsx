@@ -23,7 +23,7 @@ import {
 } from '@/lib/supabase'
 import type { Product, Category as CategoryType, Tag as TagType } from '@/types'
 import { useAuthStore } from '@/store/auth'
-import { getLowStockLevel, getLowStockLevelColor } from '@/hooks/useLowStock'
+import { calcStockAlert, getLowStockLevelColor, useSalesVelocity30d, formatSellableDays } from '@/hooks/useLowStock'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -117,6 +117,9 @@ export default function MobileProducts() {
   // 暂未入仓数量内联编辑
   const [editUnallocProductId, setEditUnallocProductId] = useState<string | null>(null)
   const [editUnallocQty, setEditUnallocQty] = useState('')
+
+  // 方案A：30天出库量 → 能卖天数预警
+  const { data: velocityMap } = useSalesVelocity30d()
 
   const { data: categories } = useQuery({
     queryKey: ['categories'],
@@ -980,7 +983,9 @@ export default function MobileProducts() {
             const productTags = getProductTags(p)
             const totalQty = productQtyMap?.get(p.id) || 0
             const isOutOfStock = totalQty === 0
-            const lowStockLevel = getLowStockLevel(totalQty)
+            const out30d = velocityMap?.get(p.id) || 0
+            const alert = calcStockAlert(totalQty, out30d)
+            const lowStockLevel = alert.level
             const lowStockColor = getLowStockLevelColor(lowStockLevel)
             const hasLowStock = lowStockLevel !== 'normal' && !isOutOfStock
             const locations = productLocationsMap?.get(p.id) || []
@@ -1012,8 +1017,12 @@ export default function MobileProducts() {
                             </span>
                           )}
                           {hasLowStock && (
-                            <span className={`px-1 py-0.5 rounded text-[10px] font-medium border ${lowStockColor.border} ${lowStockColor.text} ${lowStockColor.bg}`}>
+                            <span
+                              className={`px-1 py-0.5 rounded text-[10px] font-medium border ${lowStockColor.border} ${lowStockColor.text} ${lowStockColor.bg}`}
+                              title={formatSellableDays(alert.sellableDays, alert.usesFallback)}
+                            >
                               {lowStockColor.label}
+                              {!alert.usesFallback && alert.sellableDays != null && ` (${alert.sellableDays.toFixed(1)}天)`}
                             </span>
                           )}
                         </div>
@@ -1240,15 +1249,18 @@ export default function MobileProducts() {
             </Button>
             {(() => {
               const range: (number | string)[] = []
-              if (totalPages <= 7) {
+              // 🆕 展开规则：≤11 页全部直接显示；>11 页就以当前页为中心 ±4（中间一共 9 页）
+              const FULL_SHOW_MAX = 11
+              const SIDE = 4
+              if (totalPages <= FULL_SHOW_MAX) {
                 for (let i = 1; i <= totalPages; i++) range.push(i)
               } else {
                 range.push(1)
-                const start = Math.max(2, page - 1)
-                const end = Math.min(totalPages - 1, page + 1)
-                if (start > 2) range.push('...')
-                for (let i = start; i <= end; i++) range.push(i)
-                if (end < totalPages - 1) range.push('...')
+                const centerStart = Math.max(2, page - SIDE)
+                const centerEnd   = Math.min(totalPages - 1, page + SIDE)
+                if (centerStart > 2) range.push('...')
+                for (let i = centerStart; i <= centerEnd; i++) range.push(i)
+                if (centerEnd < totalPages - 1) range.push('...')
                 range.push(totalPages)
               }
               return range.map((p, i) =>

@@ -20,6 +20,7 @@ const CategoriesPage = lazy(() => import('@/pages/desktop/Categories'))
 const OutOfStockPage = lazy(() => import('@/pages/desktop/OutOfStock'))
 const LowStockPage = lazy(() => import('@/pages/desktop/LowStock'))
 const MaterialsPage = lazy(() => import('@/pages/desktop/Materials'))
+const StatsPage = lazy(() => import('@/pages/desktop/Stats'))
 
 const MobileLayout = lazy(() => import('@/pages/mobile/Layout'))
 const MobileHome = lazy(() => import('@/pages/mobile/Home'))
@@ -38,6 +39,7 @@ const MobileStockIn = lazy(() => import('@/pages/mobile/StockIn'))
 const MobileStockOut = lazy(() => import('@/pages/mobile/StockOut'))
 const MobileSettings = lazy(() => import('@/pages/mobile/Settings'))
 const SettingsPage = lazy(() => import('@/pages/desktop/Settings'))
+const MobileStats = lazy(() => import('@/pages/mobile/Stats'))
 
 function ProtectedRoute({ children, name }: { children: React.ReactNode; name?: string }) {
   const user = useAuthStore((s) => s.user)
@@ -105,6 +107,7 @@ export default function App() {
             <Route path="users" element={<MobileUsers />} />
             <Route path="out-of-stock" element={<MobileOutOfStock />} />
             <Route path="low-stock" element={<MobileLowStock />} />
+            <Route path="stats" element={<MobileStats />} />
             <Route path="stock-in" element={<MobileStockIn />} />
             <Route path="stock-out" element={<MobileStockOut />} />
             <Route path="settings" element={<MobileSettings />} />
@@ -134,6 +137,7 @@ export default function App() {
           <Route path="users" element={<UsersPage />} />
           <Route path="out-of-stock" element={<OutOfStockPage />} />
           <Route path="low-stock" element={<LowStockPage />} />
+          <Route path="stats" element={<StatsPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>

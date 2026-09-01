@@ -5,6 +5,7 @@ import { useAuthStore } from '@/store/auth'
 import { cn } from '@/lib/utils'
 import { ROLE_LABELS } from '@/lib/permissions'
 import { shallow } from 'zustand/shallow'
+import BackToTop from '@/components/BackToTop'
 
 const allTabs = [
   { to: '/m', label: '首页', icon: Home, end: true, requireWrite: false },
@@ -88,10 +89,12 @@ function MobileLayoutInner() {
   return (
     <div className="flex flex-col h-screen bg-muted/30 max-w-md mx-auto">
       <MobileHeader name={name} roleLabel={roleLabel} />
-      <main className="flex-1 overflow-y-auto pb-16">
+      <main id="scroll-container-mobile" className="flex-1 overflow-y-auto pb-16">
         <Outlet />
       </main>
       <BottomTabs tabs={tabs} />
+      {/* 🆕 一键回到顶部（全移动端页通用，位置不挡底部 tab；监听 main 才是真实滚动容器） */}
+      <BackToTop mobile containerId="scroll-container-mobile" />
     </div>
   )
 }

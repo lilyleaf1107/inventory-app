@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Search, ImagePlus, MapPin, Tag, X, AlertTriangle, ArrowUp } from 'lucide-react'
+import { Search, ImagePlus, MapPin, Tag, X, AlertTriangle } from 'lucide-react'
 import { supabase, getProductImageUrl } from '@/lib/supabase'
 import type { Category as CategoryType, Tag as TagType } from '@/types'
 import { useOutOfStock } from '@/hooks/useOutOfStock'
@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/table'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Link } from 'react-router-dom'
+import { scrollToTopOfPage } from '@/lib/utils'
 
 const TAG_COLORS = [
   'bg-blue-100 text-blue-700',
@@ -196,24 +197,8 @@ export default function InventoryPage() {
     [inventory, page],
   )
 
-  const [showTop, setShowTop] = useState(false)
-  useEffect(() => {
-    const onScroll = () => setShowTop(window.scrollY > 300)
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => window.removeEventListener('scroll', onScroll)
-  }, [])
-
   return (
     <div className="space-y-4">
-      {showTop && (
-        <button
-          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-          className="fixed bottom-6 right-6 z-30 h-11 w-11 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center"
-          aria-label="返回顶部"
-        >
-          <ArrowUp className="h-5 w-5" />
-        </button>
-      )}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">库存查询</h2>
@@ -450,28 +435,31 @@ export default function InventoryPage() {
 
       {(inventory?.length || 0) > PAGE_SIZE && (
         <div className="flex items-center justify-center gap-1 py-2 text-sm flex-wrap">
-          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(1); scrollToTopOfPage() }}>
             首页
           </Button>
-          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(page - 1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(page - 1); scrollToTopOfPage() }}>
             上一页
           </Button>
           {(() => {
             const range: (number | string)[] = []
-            if (totalPages <= 7) {
+            // 🆕 展开规则：≤11 页全部直接显示；>11 页就以当前页为中心 ±4（中间一共 9 页）
+            const FULL_SHOW_MAX = 11
+            const SIDE = 4
+            if (totalPages <= FULL_SHOW_MAX) {
               for (let i = 1; i <= totalPages; i++) range.push(i)
             } else {
               range.push(1)
-              const start = Math.max(2, page - 1)
-              const end = Math.min(totalPages - 1, page + 1)
-              if (start > 2) range.push('...')
-              for (let i = start; i <= end; i++) range.push(i)
-              if (end < totalPages - 1) range.push('...')
+              const centerStart = Math.max(2, page - SIDE)
+              const centerEnd   = Math.min(totalPages - 1, page + SIDE)
+              if (centerStart > 2) range.push('...')
+              for (let i = centerStart; i <= centerEnd; i++) range.push(i)
+              if (centerEnd < totalPages - 1) range.push('...')
               range.push(totalPages)
             }
             return range.map((p, i) =>
               typeof p === 'number' ? (
-                <Button key={i} variant={p === page ? 'default' : 'outline'} size="sm" onClick={() => { setPage(p); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+                <Button key={i} variant={p === page ? 'default' : 'outline'} size="sm" onClick={() => { setPage(p); scrollToTopOfPage() }}>
                   {p}
                 </Button>
               ) : (
@@ -479,10 +467,10 @@ export default function InventoryPage() {
               ),
             )
           })()}
-          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(page + 1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(page + 1); scrollToTopOfPage() }}>
             下一页
           </Button>
-          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(totalPages); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(totalPages); scrollToTopOfPage() }}>
             末页
           </Button>
           <span className="text-muted-foreground ml-2">第 {page}/{totalPages} 页 · 共 {inventory?.length} 个</span>

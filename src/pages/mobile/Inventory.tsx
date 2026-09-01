@@ -1,3 +1,4 @@
+import { scrollToTopOfPage } from '@/lib/utils'
 import { useState, useMemo, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -176,7 +177,7 @@ export default function MobileInventory() {
     <div className="p-4 space-y-3 pb-2">
       {showTop && (
         <button
-          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          onClick={() => scrollToTopOfPage()}
           className="fixed bottom-6 right-4 z-30 h-11 w-11 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center"
           aria-label="返回顶部"
         >
@@ -396,28 +397,31 @@ export default function MobileInventory() {
 
       {(inventory?.length || 0) > PAGE_SIZE && (
         <div className="flex items-center justify-center gap-1 py-3 text-xs flex-wrap">
-          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(1); scrollToTopOfPage() }}>
             首页
           </Button>
-          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(page - 1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(page - 1); scrollToTopOfPage() }}>
             上一页
           </Button>
           {(() => {
             const range: (number | string)[] = []
-            if (totalPages <= 7) {
+            // 🆕 展开规则：≤11 页全部直接显示；>11 页就以当前页为中心 ±4（中间一共 9 页）
+            const FULL_SHOW_MAX = 11
+            const SIDE = 4
+            if (totalPages <= FULL_SHOW_MAX) {
               for (let i = 1; i <= totalPages; i++) range.push(i)
             } else {
               range.push(1)
-              const start = Math.max(2, page - 1)
-              const end = Math.min(totalPages - 1, page + 1)
-              if (start > 2) range.push('...')
-              for (let i = start; i <= end; i++) range.push(i)
-              if (end < totalPages - 1) range.push('...')
+              const centerStart = Math.max(2, page - SIDE)
+              const centerEnd   = Math.min(totalPages - 1, page + SIDE)
+              if (centerStart > 2) range.push('...')
+              for (let i = centerStart; i <= centerEnd; i++) range.push(i)
+              if (centerEnd < totalPages - 1) range.push('...')
               range.push(totalPages)
             }
             return range.map((p, i) =>
               typeof p === 'number' ? (
-                <Button key={i} variant={p === page ? 'default' : 'outline'} size="sm" onClick={() => { setPage(p); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+                <Button key={i} variant={p === page ? 'default' : 'outline'} size="sm" onClick={() => { setPage(p); scrollToTopOfPage() }}>
                   {p}
                 </Button>
               ) : (
@@ -425,10 +429,10 @@ export default function MobileInventory() {
               ),
             )
           })()}
-          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(page + 1); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(page + 1); scrollToTopOfPage() }}>
             下一页
           </Button>
-          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(totalPages); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(totalPages); scrollToTopOfPage() }}>
             末页
           </Button>
           <span className="text-muted-foreground ml-1">{page}/{totalPages}页·共{inventory?.length}</span>

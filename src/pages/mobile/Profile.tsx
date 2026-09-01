@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { LogOut, User, Shield, ChevronRight, List, Users, Settings } from 'lucide-react'
+import { LogOut, User, Shield, ChevronRight, List, Users, Settings, BarChart3 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -53,6 +53,15 @@ export default function MobileProfile() {
         icon: Users,
         iconClass: 'text-rose-600',
         bgClass: 'bg-rose-50',
+        requireAdmin: true,
+      },
+      {
+        to: '/m/stats',
+        label: '数据统计',
+        desc: '出库趋势与产品排行',
+        icon: BarChart3,
+        iconClass: 'text-indigo-600',
+        bgClass: 'bg-indigo-50',
         requireAdmin: true,
       },
       {

@@ -17,6 +17,7 @@ import {
   AlertTriangle,
   Gauge,
   Boxes,
+  BarChart3,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 import { Button } from '@/components/ui/button'
@@ -24,6 +25,7 @@ import { cn } from '@/lib/utils'
 import { useOutOfStock } from '@/hooks/useOutOfStock'
 import { useLowStockCount } from '@/hooks/useLowStock'
 import { ROLE_LABELS } from '@/lib/permissions'
+import BackToTop from '@/components/BackToTop'
 
 interface NavItem {
   to: string
@@ -50,6 +52,7 @@ const navItems: NavItem[] = [
 
 const adminItems: NavItem[] = [
   { to: '/users', label: '用户管理', icon: Users },
+  { to: '/stats', label: '数据统计', icon: BarChart3 },
   { to: '/settings', label: '设置', icon: Settings },
 ]
 
@@ -223,10 +226,12 @@ export default function DesktopLayout() {
             工作台
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto p-6">
+        <main id="scroll-container" className="flex-1 overflow-y-auto p-6">
           <Outlet />
         </main>
       </div>
+      {/* 🆕 一键回到顶部（监听 main#scroll-container，因为 main 才是真正的滚动容器） */}
+      <BackToTop containerId="scroll-container" />
     </div>
   )
 }
