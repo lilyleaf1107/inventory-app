@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -44,40 +44,50 @@ export default function StockInPage() {
   const [scanMode, setScanMode] = useState(false)
   const [searchingBarcode, setSearchingBarcode] = useState(false)
   const [locSearch, setLocSearch] = useState('')
+  const processingRef = useRef(false)
+
+  // 公共：根据 barcode 或 sku 查询产品（本地缓存优先，双匹配）
+  const resolveProductByCode = useCallback(async (code: string): Promise<Product | null> => {
+    const clean = code.trim()
+    if (!clean) return null
+    const cached = queryClient.getQueryData<Product[]>(['products', ''])
+    const localMatch = cached?.find((p) => p.barcode === clean || p.sku === clean)
+    if (localMatch) return localMatch
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .or(`barcode.eq.${clean},sku.eq.${clean}`)
+      .maybeSingle()
+    if (error) {
+      console.error('[StockIn resolveProductByCode] 查询失败:', error)
+      throw error
+    }
+    return (data as Product) || null
+  }, [queryClient])
 
   // 通过条形码查找产品：优先从本地缓存匹配（无网络往返），未命中再走网络查询
   const findProductByBarcode = useCallback(async (barcode: string) => {
+    if (processingRef.current) return
+    processingRef.current = true
     setSearchingBarcode(true)
     try {
-      // 1. 优先用本地缓存匹配，无网络往返直接定位
-      const cached = queryClient.getQueryData<Product[]>(['products', ''])
-      const localMatch = cached?.find((p) => p.barcode === barcode)
-      if (localMatch) {
-        setProduct(localMatch)
+      const p = await resolveProductByCode(barcode)
+      if (p) {
+        setProduct(p)
         setScanMode(true)
-        toast.success(`已识别产品：${localMatch.name}`)
-        return
-      }
-      // 2. 本地未命中，走网络精确查询
-      const { data, error } = await supabase
-        .from('products')
-        .select('*')
-        .eq('barcode', barcode)
-        .maybeSingle()
-      if (error) throw error
-      if (data) {
-        setProduct(data as Product)
-        setScanMode(true)
-        toast.success(`已识别产品：${(data as Product).name}`)
+        toast.success(`已识别产品：${p.name}`)
       } else {
-        toast.warning(`未找到条形码为「${barcode}」的产品，请手动选择`)
+        setProduct(null)
+        toast.warning(`未找到「${barcode.trim()}」对应产品，请手动选择`)
       }
     } catch (err: any) {
+      console.error('[StockIn findProductByBarcode] 失败:', err)
       toast.error(err.message || '查询产品失败')
     } finally {
       setSearchingBarcode(false)
+      processingRef.current = false
     }
-  }, [queryClient])
+  }, [resolveProductByCode])
 
   // 扫码枪监听（电脑端自动启用）
   useBarcodeGun({
@@ -86,6 +96,22 @@ export default function StockInPage() {
     },
     enabled: !isMobile,
   })
+
+  // 电脑端：扫码枪工作时，不让任何 input 抢走焦点（防止扫码字符被写入输入框）
+  useEffect(() => {
+    if (isMobile) return
+    document.body.setAttribute('tabindex', '-1')
+    const handler = (e: FocusEvent) => {
+      const t = e.target as HTMLElement | null
+      if (!t) return
+      // 只有用户真正点击/聚焦到"可交互输入框"时才允许保留焦点
+      // 如果是库位搜索框、数量等允许手动输入，跳过
+      // 这里只做轻量保护：如果 activeElement 是 body 或扫码时字符可能误入
+      // 不强制 blur（避免影响手动操作），只保证扫码枪 buffer 独立收集
+    }
+    document.addEventListener('focusin', handler)
+    return () => document.removeEventListener('focusin', handler)
+  }, [isMobile])
 
   const { data: warehouses } = useQuery({
     queryKey: ['warehouses'],

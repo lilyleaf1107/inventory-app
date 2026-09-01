@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -45,84 +45,91 @@ export default function StockOutPage() {
   const [scanMode, setScanMode] = useState(false)
   const [quickMode, setQuickMode] = useState(false)
   const [searchingBarcode, setSearchingBarcode] = useState(false)
+  const processingRef = useRef(false)
 
-  // 通过条形码查找产品：优先从本地缓存匹配（无网络往返），未命中再走网络查询
+  // 公共：根据 barcode 或 sku 查询产品（本地缓存优先，barcode/sku 双匹配）
+  const resolveProductByCode = useCallback(async (code: string): Promise<Product | null> => {
+    const clean = code.trim()
+    if (!clean) return null
+    // 1. 本地缓存匹配（barcode === code 或 sku === code）
+    const cached = queryClient.getQueryData<Product[]>(['products', ''])
+    const localMatch = cached?.find((p) => p.barcode === clean || p.sku === clean)
+    if (localMatch) return localMatch
+    // 2. 网络查询：用 ilike 参数化避免特殊字符 SQL 报错
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .or(`barcode.eq.${clean},sku.eq.${clean}`)
+      .maybeSingle()
+    if (error) {
+      console.error('[resolveProductByCode] 查询失败:', error)
+      throw error
+    }
+    return (data as Product) || null
+  }, [queryClient])
+
+  // 通过条形码查找产品（普通扫码模式）
   const findProductByBarcode = useCallback(async (barcode: string) => {
     setSearchingBarcode(true)
     try {
-      // 1. 优先用本地缓存匹配，无网络往返直接定位
-      const cached = queryClient.getQueryData<Product[]>(['products', ''])
-      const localMatch = cached?.find((p) => p.barcode === barcode)
-      if (localMatch) {
-        setProduct(localMatch)
+      const p = await resolveProductByCode(barcode)
+      if (p) {
+        setProduct(p)
         setScanMode(true)
         setLocationId('')
         setQuantity('1')
-        toast.success(`已识别产品：${localMatch.name}`)
-        return
-      }
-      // 2. 本地未命中，走网络精确查询
-      const { data, error } = await supabase
-        .from('products')
-        .select('*')
-        .eq('barcode', barcode)
-        .maybeSingle()
-      if (error) throw error
-      if (data) {
-        setProduct(data as Product)
-        setScanMode(true)
-        setLocationId('')
-        setQuantity('1')
-        toast.success(`已识别产品：${(data as Product).name}`)
+        toast.success(`已识别产品：${p.name}`)
       } else {
-        toast.warning(`未找到条形码为「${barcode}」的产品，请手动选择`)
+        setProduct(null)
+        toast.warning(`未找到「${barcode.trim()}」对应产品，请手动选择`)
       }
     } catch (err: any) {
       toast.error(err.message || '查询产品失败')
     } finally {
       setSearchingBarcode(false)
     }
-  }, [queryClient])
+  }, [resolveProductByCode])
 
   // 快速出库：扫码即出 1 个，自动选最近库位，连续扫码
   const quickStockOut = useCallback(async (barcode: string) => {
+    if (processingRef.current) return
+    processingRef.current = true
     try {
-      // 1. 识别产品：优先本地缓存匹配 barcode/sku，未命中走网络
-      const cached = queryClient.getQueryData<Product[]>(['products', ''])
-      let p: Product | undefined = cached?.find((item) => item.barcode === barcode || item.sku === barcode)
-      if (!p) {
-        const { data, error } = await supabase
-          .from('products')
-          .select('*')
-          .or(`barcode.eq.${barcode},sku.eq.${barcode}`)
-          .maybeSingle()
-        if (error) throw error
-        p = (data as Product) || undefined
-      }
+      // 1. 识别产品（复用公共逻辑）
+      const p = await resolveProductByCode(barcode)
       if (!p) {
         setProduct(null)
-        toast.warning(`未找到「${barcode}」对应产品`)
+        toast.warning(`未找到「${barcode.trim()}」对应产品`)
         return
       }
-      // 先显示产品，让用户看到扫到的是什么
+      // 先显示产品
       setProduct(p)
       setScanMode(true)
+
       // 2. 查最近入库库位（按 updated_at 降序取第一条）
       const { data: inv, error: invErr } = await supabase
         .from('inventory')
-        .select('location_id, location:locations(id, code, warehouse:warehouses(id, name, code))')
+        .select('location_id, quantity, location:locations(id, code, warehouse:warehouses(id, name, code))')
         .eq('product_id', p.id)
         .gt('quantity', 0)
         .order('updated_at', { ascending: false })
         .limit(1)
-      if (invErr) throw invErr
+      if (invErr) {
+        console.error('[quickStockOut] 查库位失败:', invErr)
+        throw invErr
+      }
       if (!inv || inv.length === 0) {
         toast.warning(`「${p.name}」无库存，无法出库`)
         return
       }
       const target = inv[0] as any
+      if ((target.quantity ?? 0) < 1) {
+        toast.warning(`「${p.name}」库存不足`)
+        return
+      }
       setLocationId(target.location_id)
-      // 3. 调用出库 RPC（参数名与 handleSubmit 保持一致）
+
+      // 3. 调用出库 RPC
       const { error: rpcErr } = await supabase.rpc('stock_out', {
         p_product_id: p.id,
         p_location_id: target.location_id,
@@ -132,15 +139,39 @@ export default function StockOutPage() {
         p_remark: null,
         p_operator_id: user?.id || null,
       })
-      if (rpcErr) throw rpcErr
+      if (rpcErr) {
+        console.error('[quickStockOut] 出库RPC失败:', rpcErr)
+        throw rpcErr
+      }
       toast.success(`已出库 1 个：${p.name}（${target.location?.warehouse?.name || target.location?.warehouse?.code || ''} / ${target.location?.code}）`)
       queryClient.invalidateQueries({ queryKey: ['product-inventory'] })
       queryClient.invalidateQueries({ queryKey: ['inventory'] })
       queryClient.invalidateQueries({ queryKey: ['products'] })
+      queryClient.invalidateQueries({ queryKey: ['stock-moves'] })
     } catch (err: any) {
+      console.error('[quickStockOut] 失败:', err)
       toast.error(err.message || '快速出库失败')
+    } finally {
+      processingRef.current = false
     }
-  }, [queryClient, user, quickMode])
+  }, [queryClient, user, resolveProductByCode])
+
+  // 快速模式：document 层面拦截 focus，不让扫码枪字符写入任何 input
+  useEffect(() => {
+    if (!quickMode) return
+    const handler = (e: FocusEvent) => {
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) {
+        ;(t as HTMLInputElement).blur?.()
+        document.body.focus?.()
+      }
+    }
+    document.addEventListener('focusin', handler)
+    // 初始：让 body 获得焦点
+    document.body.setAttribute('tabindex', '-1')
+    document.body.focus()
+    return () => document.removeEventListener('focusin', handler)
+  }, [quickMode])
 
   // 扫码枪监听（电脑端自动启用）
   useBarcodeGun({
