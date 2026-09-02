@@ -56,14 +56,9 @@ export default function OutOfStockPage() {
     }
   }, [outOfStockItems])
 
-  // 按缺货时长排序（最长的在前）
+  // hook 已按出货优先级排序，直接用
   const sortedItems = useMemo(() => {
-    if (!outOfStockItems) return []
-    return [...outOfStockItems].sort((a, b) => {
-      const ta = a.lastOutAt ? new Date(a.lastOutAt).getTime() : 0
-      const tb = b.lastOutAt ? new Date(b.lastOutAt).getTime() : 0
-      return ta - tb // 越早断货的排越前
-    })
+    return outOfStockItems || []
   }, [outOfStockItems])
 
   return (
@@ -146,6 +141,7 @@ export default function OutOfStockPage() {
               <TableHead>产品</TableHead>
               <TableHead>SKU / 条码</TableHead>
               <TableHead>仓库 / 库位</TableHead>
+              <TableHead>30天出库</TableHead>
               <TableHead>断货时间</TableHead>
               <TableHead>缺货时长</TableHead>
               <TableHead>状态</TableHead>
@@ -154,13 +150,13 @@ export default function OutOfStockPage() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                   加载中...
                 </TableCell>
               </TableRow>
             ) : sortedItems.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                   暂无缺货商品
                 </TableCell>
               </TableRow>
@@ -204,6 +200,11 @@ export default function OutOfStockPage() {
                         {item.location.code}
                         {item.location.description && ` · ${item.location.description}`}
                       </div>
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      <span className="font-bold">{item.outQty30d}</span>
+                      <span className="text-muted-foreground text-xs ml-1">{item.product.unit}</span>
+                      <div className="text-xs text-muted-foreground">日均 {item.dailyAvg.toFixed(1)}</div>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {item.lastOutAt

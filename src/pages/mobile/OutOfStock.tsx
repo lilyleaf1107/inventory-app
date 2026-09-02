@@ -50,12 +50,7 @@ export default function MobileOutOfStock() {
   }, [outOfStockItems])
 
   const sortedItems = useMemo(() => {
-    if (!outOfStockItems) return []
-    return [...outOfStockItems].sort((a, b) => {
-      const ta = a.lastOutAt ? new Date(a.lastOutAt).getTime() : 0
-      const tb = b.lastOutAt ? new Date(b.lastOutAt).getTime() : 0
-      return ta - tb
-    })
+    return outOfStockItems || []
   }, [outOfStockItems])
 
   return (
@@ -167,6 +162,14 @@ export default function MobileOutOfStock() {
                           <span className={`text-xs font-bold ${color.text}`}>
                             <TrendingUp className="h-3 w-3 inline mr-0.5" />
                             已缺货 {formatOutOfStockDuration(item.lastOutAt)}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-xs text-muted-foreground">
+                            30天出库 <span className="font-bold text-foreground">{item.outQty30d}</span> {item.product.unit}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            日均 {item.dailyAvg.toFixed(1)}
                           </span>
                         </div>
                       </div>

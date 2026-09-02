@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { useSalesVelocity30d, OUT_30_DAYS_WINDOW } from '@/hooks/useLowStock'
 
 export interface OutOfStockItem {
   id: string
@@ -24,12 +25,18 @@ export interface OutOfStockItem {
     }
   }
   lastOutAt: string | null
+  outQty30d: number       // 近30天出库总量
+  dailyAvg: number        // 日均出库量
 }
 
 export function useOutOfStock() {
+  const { data: velocityMap } = useSalesVelocity30d()
+
   return useQuery({
-    queryKey: ['out-of-stock'],
+    queryKey: ['out-of-stock', velocityMap ? 'v' : 'l'],
     queryFn: async () => {
+      const vMap = velocityMap || new Map<string, number>()
+
       // 1. 查询所有缺货记录（quantity = 0）
       const { data: zeroInventory, error: invError } = await supabase
         .from('inventory')
@@ -73,11 +80,25 @@ export function useOutOfStock() {
         }
       }
 
-      // 4. 合并结果
-      return items.map((item) => ({
-        ...item,
-        lastOutAt: lastOutMap.get(`${item.product.id}:${item.location.id}`) || null,
-      }))
+      // 4. 合并结果 + 注入30天出库量/日均
+      const enriched = items.map((item) => {
+        const out30 = vMap.get(item.product.id) || 0
+        return {
+          ...item,
+          lastOutAt: lastOutMap.get(`${item.product.id}:${item.location.id}`) || null,
+          outQty30d: out30,
+          dailyAvg: out30 / OUT_30_DAYS_WINDOW,
+        }
+      })
+
+      // 5. 按出货优先级排序：30天出库量降序 → 有出库的在前 → 同量则断货越久越前 → 产品名兜底
+      return enriched.sort((a, b) => {
+        if (a.outQty30d !== b.outQty30d) return b.outQty30d - a.outQty30d
+        const ta = a.lastOutAt ? new Date(a.lastOutAt).getTime() : 0
+        const tb = b.lastOutAt ? new Date(b.lastOutAt).getTime() : 0
+        if (ta !== tb) return ta - tb
+        return (a.product.name || '').localeCompare(b.product.name || '')
+      })
     },
   })
 }
