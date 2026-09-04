@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { supabase } from '@/lib/supabase'
+import { supabase, columnsExists } from '@/lib/supabase'
 import { useSalesVelocity30d, OUT_30_DAYS_WINDOW } from '@/hooks/useLowStock'
 
 export interface OutOfStockItem {
@@ -13,6 +13,8 @@ export interface OutOfStockItem {
     image_path: string | null
     unit: string
     category: string | null
+    track_qty?: boolean
+    manual_status?: 'normal' | 'low_stock' | 'out_of_stock' | null
   }
   location: {
     id: string
@@ -27,23 +29,31 @@ export interface OutOfStockItem {
   lastOutAt: string | null
   outQty30d: number       // 近30天出库总量
   dailyAvg: number        // 日均出库量
+  manualOverride?: boolean  // 不计数量 手动设置为缺货
 }
 
 export function useOutOfStock() {
   const { data: velocityMap } = useSalesVelocity30d()
 
   return useQuery({
-    queryKey: ['out-of-stock', velocityMap ? 'v' : 'l'],
+    queryKey: ['out-of-stock-v2', velocityMap ? 'v' : 'l'],
     queryFn: async () => {
       const vMap = velocityMap || new Map<string, number>()
 
-      // 1. 查询所有缺货记录（quantity = 0）
+      // 🛡 探测 products 新列
+      const cols = await columnsExists('products', ['track_qty', 'manual_status'])
+      const baseFields = ['id', 'name', 'sku', 'barcode', 'image_path', 'unit', 'category']
+      if (cols.track_qty) baseFields.push('track_qty')
+      if (cols.manual_status) baseFields.push('manual_status')
+      const productFields = baseFields.join(', ')
+
+      // 1. 所有 inventory quantity=0（正常缺货）
       const { data: zeroInventory, error: invError } = await supabase
         .from('inventory')
         .select(`
           id,
           quantity,
-          product:products ( id, name, sku, barcode, image_path, unit, category ),
+          product:products ( ${productFields} ),
           location:locations (
             id, code, description,
             warehouse:warehouses ( id, code, name )
@@ -53,9 +63,49 @@ export function useOutOfStock() {
         .order('updated_at', { ascending: false })
 
       if (invError) throw invError
-      if (!zeroInventory || zeroInventory.length === 0) return []
+      const items: OutOfStockItem[] = (zeroInventory || []) as unknown as OutOfStockItem[]
 
-      const items = zeroInventory as unknown as OutOfStockItem[]
+      // 2. 不计数量的产品（track_qty=false）+ manual_status=out_of_stock → 也算缺货
+      if (cols.track_qty && cols.manual_status) {
+        const { data: manualOut, error: manualErr } = await supabase
+          .from('products')
+          .select(productFields)
+          .eq('track_qty', false)
+          .eq('manual_status', 'out_of_stock')
+        if (manualErr) throw manualErr
+        for (const p of (manualOut || []) as any[]) {
+          // 如果 inventory 里已经有该产品=0 项，不要重复
+          const already = items.find((i) => i.product.id === p.id)
+          if (already) continue
+          items.push({
+            id: `manual-out-${p.id}`,
+            quantity: 0,
+            product: {
+              id: p.id,
+              name: p.name,
+              sku: p.sku,
+              barcode: p.barcode,
+              image_path: p.image_path,
+              unit: p.unit,
+              category: p.category,
+              track_qty: !!p.track_qty,
+              manual_status: p.manual_status,
+            },
+            location: {
+              id: 'manual',
+              code: '不计数量',
+              description: '手动设置为缺货',
+              warehouse: { id: 'manual', code: '', name: null },
+            },
+            lastOutAt: null,
+            outQty30d: vMap.get(p.id as string) || 0,
+            dailyAvg: (vMap.get(p.id as string) || 0) / OUT_30_DAYS_WINDOW,
+            manualOverride: true,
+          })
+        }
+      }
+
+      if (items.length === 0) return []
 
       // 2. 获取这些缺货项对应的最后一条出库时间
       const productIds = [...new Set(items.map((i) => i.product.id))]

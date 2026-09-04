@@ -295,32 +295,24 @@ export default function MobileMaterials() {
                     </div>
                   )}
                 </div>
-                <div className="mt-2">
-                  {canWrite() ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className={`w-full h-8 text-xs ${
-                        m.is_out_of_stock_marked
-                          ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100'
-                          : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-100'
-                      }`}
-                      onClick={() =>
-                        toggleMarkedMutation.mutate({ id: m.id, value: !m.is_out_of_stock_marked })
-                      }
-                    >
-                      {m.is_out_of_stock_marked ? '缺货' : '正常'}
-                    </Button>
-                  ) : m.is_out_of_stock_marked ? (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-red-100 text-red-700 font-medium w-full justify-center">
-                      <AlertTriangle className="h-3 w-3" />
+                <div
+                  className={canWrite() ? 'cursor-pointer select-none' : ''}
+                  onClick={() => {
+                    if (!canWrite()) return
+                    toggleMarkedMutation.mutate({ id: m.id, value: !m.is_out_of_stock_marked })
+                  }}
+                >
+                  {m.is_out_of_stock_marked ? (
+                    <div className="inline-flex items-center justify-center gap-1 w-full py-2 rounded-lg text-xs font-bold bg-red-100 text-red-700 border border-red-200 shadow-sm">
+                      <AlertTriangle className="h-4 w-4" />
                       缺货
-                    </span>
+                      {canWrite() && <span className="ml-1 text-red-400 font-normal text-[10px]">点击切换</span>}
+                    </div>
                   ) : (
-                    <span className="inline-flex px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-600 w-full justify-center">
-                      正常
-                    </span>
+                    <div className="inline-flex items-center justify-center gap-1 w-full py-2 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm">
+                      ✓ 正常
+                      {canWrite() && <span className="ml-1 text-emerald-500 font-normal text-[10px]">点击切换</span>}
+                    </div>
                   )}
                 </div>
               </CardContent>

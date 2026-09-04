@@ -241,16 +241,16 @@ function MobileHomeInner() {
     () =>
       [
         {
-          to: '/m/stock-in?scan=1',
-          label: '扫码入库',
+          to: '/m/stock-in',
+          label: '快速入库',
           icon: ArrowDownToLine,
           iconClass: 'text-emerald-600',
           bgClass: 'bg-emerald-50',
           requireWrite: true,
         },
         {
-          to: '/m/stock-out?scan=1',
-          label: '扫码出库',
+          to: '/m/stock-out',
+          label: '快速出库',
           icon: ArrowUpFromLine,
           iconClass: 'text-amber-600',
           bgClass: 'bg-amber-50',

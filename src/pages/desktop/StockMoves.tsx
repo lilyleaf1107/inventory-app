@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -13,13 +13,20 @@ import {
   Store,
   Truck,
   Layers,
+  Pencil,
+  X,
+  Check,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { buildPageRange, cn, formatDate, scrollToTopOfPage } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Textarea } from '@/components/ui/textarea'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
 
 type StockMoveRow = {
   id: string
@@ -28,8 +35,9 @@ type StockMoveRow = {
   scan_mode: 'manual' | 'scan'
   batch_no: string | null
   remark: string | null
-  tracking_no?: string | null
-  is_offline?: boolean | null
+  tracking_no: string | null
+  is_offline: boolean | null
+  operator_name: string | null
   created_at: string
   product: { id: string; name: string; sku: string | null; unit: string }
   location: {
@@ -80,24 +88,31 @@ function moveShipLabel(m: StockMoveRow): {
 const GROUP_PAGE_SIZE = 15 // 每页显示多少组（一组=一个快递单/一个线下客户/一个入库批次）
 
 export default function StockMovesPage() {
+  const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<'all' | 'in' | 'out'>('all')
   const [shipModeFilter, setShipModeFilter] = useState<'all' | 'online' | 'offline'>('all')
   const [trackingSearch, setTrackingSearch] = useState('')
-  // 🆕 默认：所有组直接展开（一眼看完全局）
   const [expanded, setExpanded] = useState<Record<GroupKey, boolean> | 'all-on' | 'all-off'>('all-on')
   const [copyToast, setCopyToast] = useState<string>('')
-  const [page, setPage] = useState(1) // 🆕 组分页
+  const [page, setPage] = useState(1)
+
+  // 组级编辑：改备注 / 补单号 / 切线上线下
+  const [editingGroup, setEditingGroup] = useState<MoveGroup | null>(null)
+  const [editShipMode, setEditShipMode] = useState<'online' | 'offline' | 'other'>('other')
+  const [editTrackingNo, setEditTrackingNo] = useState('')
+  const [editRemark, setEditRemark] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
 
   const { data: moves, isLoading, error, refetch } = useQuery({
     queryKey: ['stock-moves-v2', typeFilter, shipModeFilter, trackingSearch],
     queryFn: async () => {
-      // 1) 稳定字段基础查询：不直接 SELECT tracking_no / is_offline，避免数据库列不存在报错
-      //    重要：过滤器必须在 .await 之前按顺序链式追加（不能先 await，否则对象就没有 .eq/.limit 了）
+      // 直接查询 tracking_no / is_offline / operator_name（0017/0018 迁移已执行完毕）
       let qb = supabase
         .from('stock_moves')
         .select(`
           id, move_type, quantity, scan_mode, batch_no, remark, created_at,
+          tracking_no, is_offline, operator_name,
           product:products(id, name, sku, unit),
           location:locations(id, code, warehouse:warehouses(id, code, name)),
           operator:profiles!stock_moves_operator_id_fkey(id, name)
@@ -109,24 +124,7 @@ export default function StockMovesPage() {
       if (err) throw err
       const rows = (data || []) as StockMoveRow[]
 
-      // 2) 尝试查询 tracking_no / is_offline（列不存在时静默跳过）
-      if (rows.length > 0) {
-        try {
-          const extra = await supabase
-            .from('stock_moves')
-            .select('id, tracking_no, is_offline')
-            .in('id', rows.map((r) => r.id))
-          if (!extra.error && extra.data) {
-            const map = new Map((extra.data as any[]).map((d) => [d.id, d]))
-            for (const r of rows) {
-              const d = map.get(r.id)
-              if (d) { (r as any).tracking_no = d.tracking_no; (r as any).is_offline = d.is_offline }
-            }
-          }
-        } catch { /* 列不存在则忽略 */ }
-      }
-
-      // 3) 客户搜索筛选
+      // 客户搜索筛选
       const s = search?.toLowerCase() || ''
       return rows.filter((r) => {
         if (typeFilter !== 'all' && r.move_type !== typeFilter) return false
@@ -345,7 +343,8 @@ export default function StockMovesPage() {
   }
 
   return (
-    <div className="space-y-4 max-w-[1400px] mx-auto">
+    <>
+      <div className="space-y-4 max-w-[1400px] mx-auto">
       {/* 页头 */}
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
@@ -494,8 +493,17 @@ export default function StockMovesPage() {
               accent === 'purple' ? 'bg-purple-100 text-purple-700 border-purple-200' :
               accent === 'green'  ? 'bg-green-100 text-green-700 border-green-200'   :
                                     'bg-slate-100 text-slate-700 border-slate-200'
-            const operatorName = g.items[0]?.operator?.name || '—'
-            // 明细操作人取第一个（同一组基本同一操作人）
+            const operatorName = g.items[0]?.operator_name || g.items[0]?.operator?.name || '—'
+            const openEdit = (e: React.MouseEvent) => {
+              e.stopPropagation()
+              setEditingGroup(g)
+              // 初始化编辑字段
+              const first = g.items[0]
+              if (g.groupType === GROUP_TYPE.OUT_ONLINE) { setEditShipMode('online'); setEditTrackingNo(first?.tracking_no || g.label || '') }
+              else if (g.groupType === GROUP_TYPE.OUT_OFFLINE) { setEditShipMode('offline'); setEditTrackingNo('') }
+              else { setEditShipMode('other'); setEditTrackingNo(first?.tracking_no || '') }
+              setEditRemark(first?.remark || '')
+            }
             return (
               <Card key={g.key} className={cn('overflow-hidden border-2 shadow-sm hover:shadow-md transition-all', borderClass)}>
                 {/* 🆕 分组头（点击展开/收起） · 一行显示所有关键信息 */}
@@ -573,11 +581,19 @@ export default function StockMovesPage() {
                         <div className="text-sm font-semibold text-slate-700 tabular-nums whitespace-nowrap">{formatDate(g.firstTime)}</div>
                       </div>
                       <div className="h-7 w-px bg-slate-200" />
-                      {/* 操作人 */}
+                      {/* 操作人 + 编辑按钮 */}
                       <div className="flex flex-col items-end leading-tight">
                         <div className="text-[10px] font-semibold uppercase text-slate-400 tracking-wider">操作人</div>
                         <div className="text-sm font-semibold text-slate-700 whitespace-nowrap">👤 {operatorName}</div>
                       </div>
+                      <div className="h-7 w-px bg-slate-200" />
+                      <button
+                        onClick={openEdit}
+                        className="h-8 px-2.5 inline-flex items-center gap-1 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors flex-shrink-0"
+                        title="编辑本组：备注 / 单号 / 线上线下"
+                      >
+                        <Pencil className="h-3.5 w-3.5" /> 编辑
+                      </button>
                     </div>
                   </div>
                 </button>
@@ -683,5 +699,92 @@ export default function StockMovesPage() {
         </div>
       )}
     </div>
+
+    {/* 编辑对话框：改备注 / 补单号 / 切换线上线下 */}
+    <Dialog open={!!editingGroup} onOpenChange={(o) => !o && setEditingGroup(null)}>
+      <DialogContent className="sm:max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Pencil className="h-5 w-5 text-indigo-600" />
+            编辑订单：{editingGroup?.label || '—'}
+            <span className="text-xs font-normal text-muted-foreground ml-1">
+              （含 {editingGroup?.items.length || 0} 条流水）
+            </span>
+          </DialogTitle>
+        </DialogHeader>
+        {editingGroup && editingGroup.groupType !== GROUP_TYPE.IN && (
+          <div className="space-y-3">
+            <Label>出库方式</Label>
+            <div className="grid grid-cols-3 gap-2">
+              {(['online','offline','other'] as const).map((m) => {
+                const active = editShipMode === m
+                const texts = { online: '线上快递', offline: '线下交易', other: '其他出库' }
+                return (
+                  <button key={m} type="button"
+                    onClick={() => setEditShipMode(m)}
+                    className={`p-3 rounded-xl border-2 text-sm font-semibold transition ${
+                      active
+                        ? m === 'online' ? 'bg-blue-50 border-blue-500 text-blue-800'
+                        : m === 'offline' ? 'bg-emerald-50 border-emerald-500 text-emerald-800'
+                        : 'bg-slate-100 border-slate-500 text-slate-800'
+                        : 'bg-background border-border text-muted-foreground hover:bg-muted/40'
+                    }`}
+                  >{texts[m]}</button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+        <div className="space-y-2">
+          <Label htmlFor="edit_tracking_no">快递单号 {editShipMode !== 'online' && <span className="text-xs text-muted-foreground">（选填）</span>}</Label>
+          <Input id="edit_tracking_no"
+            disabled={editShipMode === 'offline'}
+            value={editShipMode === 'offline' ? '（线下，不写单号）' : editTrackingNo}
+            onChange={(e) => setEditTrackingNo(e.target.value)}
+            placeholder="例如：SF1234567890"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="edit_remark">备注 <span className="text-xs text-muted-foreground">（后补充内容写这里，写了会覆盖本组所有流水原有备注）</span></Label>
+          <Textarea id="edit_remark" value={editRemark} onChange={(e) => setEditRemark(e.target.value)}
+            rows={3} placeholder="例如：客户自提 / 赠品 / 补录单号 SFxxxx" />
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => setEditingGroup(null)} disabled={savingEdit}>
+            <X className="h-4 w-4 mr-1" /> 取消
+          </Button>
+          <Button disabled={savingEdit} onClick={async () => {
+            const g = editingGroup
+            if (!g) return
+            setSavingEdit(true)
+            try {
+              const ids = g.items.map((m) => m.id)
+              const patch: Record<string, any> = {}
+              if (g.groupType !== GROUP_TYPE.IN) {
+                patch.tracking_no = editShipMode === 'online' ? (editTrackingNo.trim() || null) : null
+                patch.is_offline = editShipMode === 'offline' ? true : (editShipMode === 'online' ? false : g.items[0]?.is_offline ?? null)
+              } else {
+                patch.tracking_no = editTrackingNo.trim() || null
+              }
+              patch.remark = editRemark.trim() || null
+              const { error } = await supabase.from('stock_moves').update(patch).in('id', ids)
+              if (error) throw error
+              toast.success('✅ 已保存')
+              setEditingGroup(null)
+              await queryClient.invalidateQueries({ queryKey: ['stock-moves'] })
+              await queryClient.invalidateQueries({ queryKey: ['sales-velocity-30d'] })
+            } catch (e: any) {
+              console.error('[编辑订单失败]', e)
+              toast.error(e?.message || '保存失败')
+            } finally {
+              setSavingEdit(false)
+            }
+          }}>
+            <Check className="h-4 w-4 mr-1" /> {savingEdit ? '保存中...' : '保存'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }

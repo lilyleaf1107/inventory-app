@@ -39,9 +39,9 @@ export default function LowStockPage() {
     if (!lowStockItems) return { total: 0, warning: 0, danger: 0, critical: 0 }
     return {
       total: lowStockItems.length,
-      warning: lowStockItems.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d) === 'warning').length,
-      danger: lowStockItems.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d) === 'danger').length,
-      critical: lowStockItems.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d) === 'critical').length,
+      warning: lowStockItems.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d, { trackQty: i.product.track_qty !== false, manualStatus: i.product.manual_status ?? null }) === 'warning').length,
+      danger: lowStockItems.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d, { trackQty: i.product.track_qty !== false, manualStatus: i.product.manual_status ?? null }) === 'danger').length,
+      critical: lowStockItems.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d, { trackQty: i.product.track_qty !== false, manualStatus: i.product.manual_status ?? null }) === 'critical').length,
     }
   }, [lowStockItems])
 
@@ -141,7 +141,10 @@ export default function LowStockPage() {
               </TableRow>
             ) : (
               pagedList.map((item) => {
-                const level = getLowStockLevelV2(item.quantity, item.outQty30d)
+                const level = getLowStockLevelV2(item.quantity, item.outQty30d, {
+                  trackQty: item.product.track_qty !== false,
+                  manualStatus: item.product.manual_status ?? null,
+                })
                 const color = getLowStockLevelColor(level)
                 const alert = calcStockAlert(item.quantity, item.outQty30d)
                 const isMaterial = item.product.is_material_area

@@ -51,6 +51,8 @@ interface InventoryItem {
     category: string | null
     min_stock: number
     is_material_area: boolean
+    track_qty?: boolean
+    manual_status?: 'normal' | 'low_stock' | 'out_of_stock' | null
   }
   location: {
     id: string
@@ -140,7 +142,7 @@ export default function InventoryPage() {
           quantity,
           batch_no,
           updated_at,
-          product:products ( id, name, sku, barcode, image_path, unit, category, min_stock, is_material_area ),
+          product:products ( id, name, sku, barcode, image_path, unit, category, min_stock, is_material_area, track_qty, manual_status ),
           location:locations (
             id,
             code,
@@ -175,7 +177,10 @@ export default function InventoryPage() {
     },
   })
 
-  const totalQty = inventory?.reduce((sum, item) => sum + Number(item.quantity), 0) || 0
+  const totalQty = inventory?.reduce((sum, item) => {
+    const track = item.product?.track_qty !== false
+    return sum + (track ? Number(item.quantity) : 0)
+  }, 0) || 0
   const totalSku = inventory?.length || 0
 
   const toggleTagFilter = (tagId: string) => {
@@ -340,14 +345,22 @@ export default function InventoryPage() {
               </TableRow>
             ) : (
               pagedInventory?.map((item) => {
-                const isOutOfStock = item.quantity === 0
+                const trackQty = item.product?.track_qty !== false
+                // 不计数量产品：用 manual_status 做状态徽章；否则按 quantity 计算低库存/缺货
+                const manualStatus = item.product?.manual_status || null
+                const calcOutOfStock = trackQty ? item.quantity === 0 : manualStatus === 'out_of_stock'
+                const calcLowLevel = !trackQty
+                  ? (manualStatus === 'low_stock' ? 'warning' : 'normal')
+                  : getLowStockLevel(item.quantity)
+                const isOutOfStock = calcOutOfStock
                 const isMaterial = item.product.is_material_area
-                const lowStockLevel = getLowStockLevel(item.quantity)
+                const lowStockLevel = calcLowLevel
                 const lowStockColor = getLowStockLevelColor(lowStockLevel)
                 const hasLowStock = lowStockLevel !== 'normal' && !isOutOfStock
                 let rowClass = ''
                 if (isOutOfStock) rowClass = 'bg-red-50/60'
                 else if (hasLowStock) rowClass = lowStockColor.bg
+                if (!trackQty && !rowClass) rowClass = 'bg-slate-50/50'
 
                 return (
                   <TableRow key={item.id} className={rowClass}>
@@ -408,6 +421,10 @@ export default function InventoryPage() {
                     <TableCell>
                       {isMaterial ? (
                         <span className="font-medium text-muted-foreground">***</span>
+                      ) : !trackQty ? (
+                        <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                          不计数量
+                        </span>
                       ) : (
                         <>
                           <span className={`font-bold ${isOutOfStock ? 'text-red-600' : ''}`}>

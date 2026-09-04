@@ -32,9 +32,9 @@ export default function MobileLowStock() {
 
   const stats = {
     total: lowStockItems?.length || 0,
-    warning: lowStockItems?.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d) === 'warning').length || 0,
-    danger: lowStockItems?.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d) === 'danger').length || 0,
-    critical: lowStockItems?.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d) === 'critical').length || 0,
+    warning: lowStockItems?.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d, { trackQty: i.product.track_qty !== false, manualStatus: i.product.manual_status ?? null }) === 'warning').length || 0,
+    danger: lowStockItems?.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d, { trackQty: i.product.track_qty !== false, manualStatus: i.product.manual_status ?? null }) === 'danger').length || 0,
+    critical: lowStockItems?.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d, { trackQty: i.product.track_qty !== false, manualStatus: i.product.manual_status ?? null }) === 'critical').length || 0,
   }
 
   return (
@@ -96,7 +96,10 @@ export default function MobileLowStock() {
           ) : (
             pagedList.map((item) => {
               const alert = calcStockAlert(item.quantity, item.outQty30d)
-              const level = alert.level
+              const level = getLowStockLevelV2(item.quantity, item.outQty30d, {
+                trackQty: item.product.track_qty !== false,
+                manualStatus: item.product.manual_status ?? null,
+              })
               const color = getLowStockLevelColor(level)
               const isMaterial = item.product.is_material_area
               const ratioPercent = alert.sellableDays == null

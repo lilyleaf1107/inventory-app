@@ -68,6 +68,23 @@ export default function StockOutPage() {
   const [remark, setRemark] = useState('')
   const trackingInputRef = useRef<HTMLInputElement>(null)
 
+  // ========== 出库人（同一账号可能对应多出库人） ==========
+  const [operatorName, setOperatorName] = useState('')
+  const { data: profileList = [] } = useQuery({
+    queryKey: ['profiles-drop-stockout'],
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('profiles').select('id, name')
+      if (error) throw error
+      return (data || []).filter((x: any) => !!x?.name) as { id: string; name: string }[]
+    },
+  })
+  const operatorListOptions = useMemo(() => {
+    const base = profileList.map((p) => p.name)
+    if (operatorName && !base.includes(operatorName)) base.unshift(operatorName)
+    return Array.from(new Set(base)).filter(Boolean)
+  }, [profileList, operatorName])
+
   // ========== 产品清单（多产品） ==========
   const [lines, setLines] = useState<OutboundLineItem[]>([])
 
@@ -125,7 +142,6 @@ export default function StockOutPage() {
           )
         `)
         .eq('product_id', activeProduct!.id)
-        .gt('quantity', 0)
         .order('updated_at', { ascending: false })
       if (error) throw error
       return data as (Inventory & {
@@ -174,7 +190,6 @@ export default function StockOutPage() {
           *, location:locations ( id, code, warehouse:warehouses (id, name, code) )
         `)
         .eq('product_id', product.id)
-        .gt('quantity', 0)
         .order('updated_at', { ascending: false })
       if (error) {
         console.error('[addProductToLines] 查库存失败', error)
@@ -194,22 +209,23 @@ export default function StockOutPage() {
 
     // 2) 合并：同 product + location 累加数量（提示超量）
     setLines((prev) => {
+      const trackQty = (product as any).track_qty !== false
       const found = prev.find(
         (l) => l.product.id === product.id && l.locationId === target.location_id,
       )
       if (found) {
         const newQty = found.quantity + qty
-        if (newQty > Number(target.quantity)) {
+        if (trackQty && newQty > Number(target.quantity)) {
           toast.warning(`「${product.name}」在 ${locLabel} 仅有 ${target.quantity} 件，清单已取最大可用`)
         }
         return prev.map((l) =>
           l.lineId === found.lineId
-            ? { ...l, quantity: Math.min(newQty, Number(target.quantity)) }
+            ? { ...l, quantity: trackQty ? Math.min(newQty, Number(target.quantity)) : newQty }
             : l,
         )
       }
-      const realQty = Math.min(qty, Number(target.quantity))
-      if (realQty < qty) {
+      const realQty = trackQty ? Math.min(qty, Number(target.quantity)) : qty
+      if (trackQty && realQty < qty) {
         toast.warning(`「${product.name}」在 ${locLabel} 仅有 ${target.quantity} 件，已自动限制`)
       }
       return [
@@ -357,15 +373,23 @@ export default function StockOutPage() {
     const finalTrackingNo = shipMode === 'online' && trackingBound ? trackingNo.trim() || null : null
     const finalIsOffline = shipMode === 'offline'
 
+    const finalOperatorName = operatorName.trim() || null
+
     setSubmitting(true)
     let successCount = 0
     let failReason = ''
     try {
       for (let i = 0; i < lines.length; i++) {
         const l = lines[i]
+        // track_qty=false 的产品，不强制校验库位数量 >= 出库量（RPC 会处理）
+        const trackQty = (l.product as any).track_qty !== false
+        if (trackQty && l.quantity > l.locationAvailable) {
+          failReason = `「${l.product.name}」在 ${l.locationLabel} 库存仅剩 ${l.locationAvailable}`
+          throw new Error(failReason)
+        }
         const { error } = await supabase.rpc('stock_out', {
           p_product_id: l.product.id,
-          p_location_id: l.locationId,
+          p_location_id: trackQty ? l.locationId : (l.locationId || null),
           p_quantity: l.quantity,
           p_batch_no: null,
           p_scan_mode: l.scanMode ? 'scan' : 'manual',
@@ -373,6 +397,7 @@ export default function StockOutPage() {
           p_operator_id: user?.id || null,
           p_tracking_no: finalTrackingNo,
           p_is_offline: finalIsOffline,
+          p_operator_name: finalOperatorName,
         })
         if (error) {
           failReason = `第 ${i + 1} 项「${l.product.name}」失败：${error.message}`
@@ -390,12 +415,19 @@ export default function StockOutPage() {
       queryClient.invalidateQueries({ queryKey: ['product-inventory'] })
       queryClient.invalidateQueries({ queryKey: ['stock-moves'] })
 
-      // 清空清单，但保留出库方式和单号（利于连续打包下一个快递）
+      // 需求3：整单提交成功后，清空【单号、清单、出库方式、出库人、备注、线下备注】所有状态
       setLines([])
       setActiveProduct(null)
       setActiveLocationId('')
       setActiveQuantity('1')
       setActiveBatchNo('')
+      setActiveLocSearch('')
+      setShipMode('online')
+      setTrackingNo('')
+      setTrackingBound(false)
+      setOfflineNote('')
+      setRemark('')
+      setOperatorName('')
     } catch (err: any) {
       console.error('[批量出库] 失败', err)
       toast.error(
@@ -407,7 +439,7 @@ export default function StockOutPage() {
     }
   }, [
     lines, linesSummary, shipModeValid, shipMode, offlineNote, quickMode, remark,
-    trackingBound, trackingNo, user, queryClient,
+    trackingBound, trackingNo, user, queryClient, operatorName,
   ])
 
   // ============================================================
@@ -619,6 +651,28 @@ export default function StockOutPage() {
               </div>
             </div>
           )}
+
+          {/* 出库人选择：同一账号支持多个不同出库人 */}
+          <div className="space-y-2 pt-2 border-t">
+            <Label htmlFor="operator_name" className="text-sm font-medium">
+              出库人 <span className="text-xs text-muted-foreground">（可选：下拉选择或手填新名字）</span>
+            </Label>
+            <div className="flex gap-2">
+              <Input
+                id="operator_name"
+                list="operator_name_list"
+                value={operatorName}
+                onChange={(e) => setOperatorName(e.target.value)}
+                placeholder="例：张三；多人共用一个账号时在此区分"
+                className="h-11"
+              />
+              <datalist id="operator_name_list">
+                {operatorListOptions.map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </datalist>
+            </div>
+          </div>
         </CardContent>
       </Card>
 

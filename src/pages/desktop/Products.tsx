@@ -3,8 +3,8 @@ import { useState, useMemo, useDeferredValue, useEffect, useLayoutEffect, useRef
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Search, Edit2, Trash2, ImagePlus, X, Tag, MapPin, Package } from 'lucide-react'
-import { supabase, getProductImageUrl, uploadProductImage, deleteProductImage } from '@/lib/supabase'
+import { Plus, Search, Edit2, Trash2, ImagePlus, X, Tag, MapPin, Package, AlertTriangle } from 'lucide-react'
+import { supabase, columnsExists, getProductImageUrl, uploadProductImage, deleteProductImage } from '@/lib/supabase'
 import type { Product, Category as CategoryType, Tag as TagType } from '@/types'
 import { useAuthStore } from '@/store/auth'
 import { calcStockAlert, getLowStockLevelColor, useSalesVelocity30d, formatSellableDays } from '@/hooks/useLowStock'
@@ -54,6 +54,8 @@ interface ProductForm {
   imagePreview: string | null
   selectedTagIds: string[]
   newTagName: string
+  track_qty: boolean
+  manual_status: 'normal' | 'low_stock' | 'out_of_stock' | null
 }
 
 const emptyForm: ProductForm = {
@@ -69,6 +71,8 @@ const emptyForm: ProductForm = {
   imagePreview: null,
   selectedTagIds: [],
   newTagName: '',
+  track_qty: true,
+  manual_status: null,
 }
 
 function getTagColor(index: number) {
@@ -94,18 +98,21 @@ export default function ProductsPage() {
   const [editingProductId, setEditingProductId] = useState<string | null>(null)
   const [newLocId, setNewLocId] = useState('')
   const [newLocQty, setNewLocQty] = useState('')
-  // 新增产品时的初始库位
   const [createLocId, setCreateLocId] = useState('')
   const [createLocQty, setCreateLocQty] = useState('')
-  // 新增产品时的暂未入仓数量（无库位）
-  const [createUnallocQty, setCreateUnallocQty] = useState('')
   // 列表内联库位编辑
   const [inlineLocProductId, setInlineLocProductId] = useState<string | null>(null)
   const [inlineLocId, setInlineLocId] = useState('')
   const [inlineLocQty, setInlineLocQty] = useState('')
-  // 暂未入仓数量内联编辑
-  const [editUnallocProductId, setEditUnallocProductId] = useState<string | null>(null)
-  const [editUnallocQty, setEditUnallocQty] = useState('')
+
+  // 🛡 探测 products 新列是否存在（兼容未执行 0018 迁移的环境）
+  const { data: productCols } = useQuery({
+    queryKey: ['col-probe-products-track_manual'],
+    queryFn: () => columnsExists('products', ['track_qty', 'manual_status']),
+    staleTime: Infinity,
+  })
+  const hasTrackQtyCol = productCols?.['track_qty'] !== false // 默认 true
+  const hasManualStatusCol = productCols?.['manual_status'] !== false
 
   // 方案A：每个产品 30 天出库量（用于按"能卖天数"预警）
   const { data: velocityMap } = useSalesVelocity30d()
@@ -135,47 +142,35 @@ export default function ProductsPage() {
     },
   })
 
-  // 每个产品的总库存汇总（按产品 id 聚合）
-  //  总库存 = inventory 聚合数量 + unallocated_quantity（暂未入仓部分）
+  // 每个产品的总库存汇总（按产品 id 聚合 inventory 表）
   const { data: productQtyMap } = useQuery({
     queryKey: ['products-qty-map'],
     queryFn: async () => {
-      const [{ data: invData, error: invErr }, { data: prodData, error: prodErr }] = await Promise.all([
-        supabase.from('inventory').select('product_id, quantity'),
-        supabase.from('products').select('id, unallocated_quantity'),
-      ])
+      const { data: invData, error: invErr } = await supabase
+        .from('inventory')
+        .select('product_id, quantity')
       if (invErr) throw invErr
-      if (prodErr) throw prodErr
       const map = new Map<string, number>()
       for (const row of invData || []) {
         const qty = Number((row as any).quantity) || 0
         const pid = (row as any).product_id as string
         map.set(pid, (map.get(pid) || 0) + qty)
       }
-      for (const row of prodData || []) {
-        const qty = Number((row as any).unallocated_quantity) || 0
-        const pid = (row as any).id as string
-        if (qty > 0) map.set(pid, (map.get(pid) || 0) + qty)
-      }
       return map
     },
     staleTime: 30 * 1000,
   })
 
-  // 每个产品的库位明细（按产品 id 聚合，显示每个库位 + 暂未入仓）
+  // 每个产品的库位明细（按产品 id 聚合 inventory）
   const { data: productLocationsMap } = useQuery({
     queryKey: ['products-locations-map'],
     queryFn: async () => {
-      const [{ data: invData, error: invErr }, { data: prodData, error: prodErr }] = await Promise.all([
-        supabase.from('inventory').select(`
-          product_id, quantity,
-          location:locations ( id, code, warehouse:warehouses ( code, name ) )
-        `),
-        supabase.from('products').select('id, unallocated_quantity').gt('unallocated_quantity', 0),
-      ])
+      const { data: invData, error: invErr } = await supabase.from('inventory').select(`
+        product_id, quantity,
+        location:locations ( id, code, warehouse:warehouses ( code, name ) )
+      `)
       if (invErr) throw invErr
-      if (prodErr) throw prodErr
-      const map = new Map<string, { id: string; code: string; warehouseName: string | null; quantity: number; isUnallocated?: boolean }[]>()
+      const map = new Map<string, { id: string; code: string; warehouseName: string | null; quantity: number }[]>()
       for (const row of (invData || []) as any[]) {
         const pid = row.product_id as string
         const loc = row.location
@@ -189,27 +184,13 @@ export default function ProductsPage() {
         })
         map.set(pid, list)
       }
-      // 暂未入仓挂在库位列表最后，id 用 "unalloc"（仅前端渲染用，无真实库位）
-      for (const row of (prodData || []) as any[]) {
-        const qty = Number(row.unallocated_quantity) || 0
-        if (qty <= 0) continue
-        const pid = row.id as string
-        const list = map.get(pid) || []
-        list.push({
-          id: 'unalloc',
-          code: '暂未入仓',
-          warehouseName: null,
-          quantity: qty,
-          isUnallocated: true,
-        })
-        map.set(pid, list)
-      }
       return map
     },
     staleTime: 30 * 1000,
   })
 
-  // 编辑时加载该产品的库存明细
+  // 编辑时加载该产品的库存明细（顺带取是否不计数量，决定显示数字还是「不计数量」badge）
+  const trackQtyOfEditing = editing ? ((editing as any).track_qty !== false) : true
   const { data: productInventory } = useQuery({
     queryKey: ['product-inventory-edit', editingProductId],
     enabled: !!editingProductId,
@@ -271,48 +252,31 @@ export default function ProductsPage() {
     },
   })
 
-  // 修改/清零暂未入仓数量
-  const updateUnalloc = useMutation({
-    mutationFn: async ({ productId, qty }: { productId: string; qty: number }) => {
-      const { error } = await supabase
-        .from('products')
-        .update({ unallocated_quantity: qty })
-        .eq('id', productId)
-      if (error) throw error
-    },
-    onSuccess: () => {
-      toast.success('暂未入仓数量已更新')
-      queryClient.invalidateQueries({ queryKey: ['products-qty-map'] })
-      queryClient.invalidateQueries({ queryKey: ['products-locations-map'] })
-      queryClient.invalidateQueries({ queryKey: ['products'] })
-      setEditUnallocProductId(null)
-      setEditUnallocQty('')
-    },
-    onError: (err: any) => toast.error(err.message || '更新失败'),
-  })
-
   const createMutation = useMutation({
-    mutationFn: async (args: { form: ProductForm; unallocatedQty: number }) => {
-      const { form: data, unallocatedQty } = args
+    mutationFn: async (form: ProductForm) => {
       let imagePath = null
-      if (data.imageFile) {
-        imagePath = await uploadProductImage(data.imageFile)
+      if (form.imageFile) {
+        imagePath = await uploadProductImage(form.imageFile)
       }
+      // 🛡 兼容：列不存在则跳过写入，避免 schema cache 报错
+      const cols = await columnsExists('products', ['track_qty', 'manual_status'])
+      const insertPayload: Record<string, any> = {
+        sku: form.sku || null,
+        name: form.name,
+        barcode: form.barcode || null,
+        category: form.category || null,
+        spec: form.spec || null,
+        unit: form.unit,
+        cost: form.cost ? Number(form.cost) : null,
+        image_path: imagePath,
+        description: form.description || null,
+        on_shelf: true,
+      }
+      if (cols.track_qty) insertPayload.track_qty = form.track_qty
+      if (cols.manual_status) insertPayload.manual_status = form.track_qty ? null : (form.manual_status || null)
       const { data: product, error } = await supabase
         .from('products')
-        .insert({
-          sku: data.sku || null,
-          name: data.name,
-          barcode: data.barcode || null,
-          category: data.category || null,
-          spec: data.spec || null,
-          unit: data.unit,
-          cost: data.cost ? Number(data.cost) : null,
-          image_path: imagePath,
-          description: data.description || null,
-          on_shelf: true,
-          unallocated_quantity: unallocatedQty > 0 ? unallocatedQty : 0,
-        })
+        .insert(insertPayload)
         .select()
         .single()
       if (error) {
@@ -320,11 +284,11 @@ export default function ProductsPage() {
         throw error
       }
 
-      if (data.selectedTagIds.length > 0) {
+      if (form.selectedTagIds.length > 0) {
         const { error: tagError } = await supabase
           .from('product_tags')
           .insert(
-            data.selectedTagIds.map((tagId) => ({
+            form.selectedTagIds.map((tagId) => ({
               product_id: product.id,
               tag_id: tagId,
             })),
@@ -342,7 +306,6 @@ export default function ProductsPage() {
       setEditingProductId(null)
       setCreateLocId('')
       setCreateLocQty('')
-      setCreateUnallocQty('')
       setForm(emptyForm)
     },
     onError: (err: any) => toast.error(err.message || '创建失败'),
@@ -357,20 +320,25 @@ export default function ProductsPage() {
           await deleteProductImage(data.oldImagePath)
         }
       }
+      // 🛡 兼容：列不存在则跳过更新写入，避免 schema cache 报错
+      const cols = await columnsExists('products', ['track_qty', 'manual_status'])
+      const updatePayload: Record<string, any> = {
+        sku: data.form.sku || null,
+        name: data.form.name,
+        barcode: data.form.barcode || null,
+        category: data.form.category || null,
+        spec: data.form.spec || null,
+        unit: data.form.unit,
+        cost: data.form.cost ? Number(data.form.cost) : null,
+        image_path: imagePath,
+        description: data.form.description || null,
+        updated_at: new Date().toISOString(),
+      }
+      if (cols.track_qty) updatePayload.track_qty = data.form.track_qty
+      if (cols.manual_status) updatePayload.manual_status = data.form.track_qty ? null : (data.form.manual_status || null)
       const { error } = await supabase
         .from('products')
-        .update({
-          sku: data.form.sku || null,
-          name: data.form.name,
-          barcode: data.form.barcode || null,
-          category: data.form.category || null,
-          spec: data.form.spec || null,
-          unit: data.form.unit,
-          cost: data.form.cost ? Number(data.form.cost) : null,
-          image_path: imagePath,
-          description: data.form.description || null,
-          updated_at: new Date().toISOString(),
-        })
+        .update(updatePayload)
         .eq('id', data.id)
       if (error) throw error
 
@@ -622,21 +590,32 @@ export default function ProductsPage() {
     },
   })
 
-  // 添加新库位库存 - 乐观更新（支持列表内联和编辑弹窗两种场景）
+  // 添加新库位库存 - 通过 stock_in RPC（支持无 locationId → 落默认库位）
   const addInv = useMutation({
-    mutationFn: async ({ productId, locationId, quantity }: { productId: string; locationId: string; quantity: number }) => {
+    mutationFn: async ({ productId, locationId, quantity }: { productId: string; locationId: string | null; quantity: number }) => {
+      const locId = locationId || null
+      const { error: rpcErr } = await supabase.rpc('stock_in', {
+        p_product_id: productId,
+        p_location_id: locId,
+        p_quantity: quantity,
+        p_scan_mode: 'manual',
+      })
+      if (rpcErr) throw rpcErr
+      // 回查写入的 inventory 行（按 product_id + locationId 或默认库位）
+      const effectiveLocId = locationId
+        ? locationId
+        : ((await supabase.from('locations').select('id').eq('code', 'DEFAULT-LOC').limit(1).maybeSingle())?.data as any)?.id || null
       const { data, error } = await supabase
         .from('inventory')
-        .insert({
-          product_id: productId,
-          location_id: locationId,
-          quantity,
-        })
         .select(`
           id, quantity,
           location:locations ( id, code, zone, rack, level, position, warehouse:warehouses ( id, name, code ) )
         `)
-        .single()
+        .eq('product_id', productId)
+        .eq('location_id', effectiveLocId)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
       if (error) throw error
       return data
     },
@@ -646,8 +625,9 @@ export default function ProductsPage() {
       await queryClient.cancelQueries({ queryKey: invKey })
       const prevInv = queryClient.getQueryData<any[]>(invKey)
       const prevLocs = queryClient.getQueryData<any[]>(locsKey)
-      const selLoc = prevLocs?.find((l) => l.id === locationId)
-      // 构造一个临时的乐观 inventory 项（id 暂时用 temp-xxx）
+      const selLoc = prevLocs?.find((l) => l.id === locationId) ||
+        (!locationId ? { id: 'DEFAULT-LOC', code: '默认库位', warehouse: null } : undefined)
+      // 构造一个临时的乐观 inventory 项
       if (selLoc && prevInv) {
         const tempItem: any = {
           id: `temp-${Date.now()}`,
@@ -673,7 +653,7 @@ export default function ProductsPage() {
           ...list,
           {
             code: selLoc.code,
-            warehouseName: selLoc.warehouse?.name || selLoc.warehouse?.code || null,
+            warehouseName: (selLoc as any).warehouse?.name || (selLoc as any).warehouse?.code || null,
             quantity: Number(quantity) || 0,
           },
         ]
@@ -736,6 +716,8 @@ export default function ProductsPage() {
       imagePreview: product.image_path ? getProductImageUrl(product.image_path) : null,
       selectedTagIds: [],
       newTagName: '',
+      track_qty: (product as any).track_qty !== false, // 兼容历史 null/undefined 视为 true
+      manual_status: (product as any).manual_status || null,
     })
 
     const { data: productTags, error } = await supabase
@@ -800,20 +782,19 @@ export default function ProductsPage() {
           oldImagePath: editing.image_path,
         })
       } else {
-        const unallocQty = Number(createUnallocQty) || 0
-        const created: any = await createMutation.mutateAsync({
-          form: safeForm,
-          unallocatedQty: unallocQty > 0 ? unallocQty : 0,
-        })
-        if (createLocId && createLocQty) {
+        const created: any = await createMutation.mutateAsync(safeForm)
+        // 有数量时：选了库位落指定库位，没选库位 → 落默认库位（stock_in RPC 会处理）
+        if (createLocQty) {
           const qty = Number(createLocQty)
           if (qty > 0) {
-            const { error: invErr } = await supabase.from('inventory').insert({
-              product_id: created.id,
-              location_id: createLocId,
-              quantity: qty,
+            const locationId = createLocId || undefined
+            const { error: stockErr } = await supabase.rpc('stock_in', {
+              p_product_id: created.id,
+              p_location_id: locationId || null,
+              p_quantity: qty,
+              p_scan_mode: 'manual',
             })
-            if (invErr) throw invErr
+            if (stockErr) throw stockErr
           }
         }
       }
@@ -1061,16 +1042,26 @@ export default function ProductsPage() {
             ) : (
               pagedProducts?.map((p) => {
                 const productTags = getProductTags(p)
+                const trackQty = (p as any).track_qty !== false
+                const manualStatus: 'normal' | 'low_stock' | 'out_of_stock' | null = (p as any).manual_status || null
                 const totalQty = productQtyMap?.get(p.id) || 0
-                const isOutOfStock = totalQty === 0
+                // 不计数量产品：状态优先用 manual_status，计算列全部覆盖
+                const effectiveOutOfStock = trackQty
+                  ? totalQty === 0
+                  : manualStatus === 'out_of_stock'
                 const out30d = velocityMap?.get(p.id) || 0
                 const alert = calcStockAlert(totalQty, out30d)
-                const lowStockLevel = alert.level
+                let lowStockLevel = alert.level
+                if (!trackQty) {
+                  lowStockLevel = manualStatus === 'out_of_stock' ? 'critical'
+                    : manualStatus === 'low_stock' ? 'warning'
+                    : 'normal'
+                }
                 const lowStockColor = getLowStockLevelColor(lowStockLevel)
-                const hasLowStock = lowStockLevel !== 'normal' && !isOutOfStock
+                const hasLowStock = lowStockLevel !== 'normal' && !effectiveOutOfStock
                 const locations = productLocationsMap?.get(p.id) || []
                 let rowClass = ''
-                if (isOutOfStock) rowClass = 'bg-red-100/60'
+                if (effectiveOutOfStock) rowClass = 'bg-red-100/60'
                 else if (hasLowStock) rowClass = lowStockColor.bg
                 return (
                   <TableRow key={p.id} className={rowClass}>
@@ -1091,16 +1082,21 @@ export default function ProductsPage() {
                     <TableCell className="font-medium">
                       <div className="flex items-center flex-wrap gap-1.5">
                         {p.name}
-                        {isOutOfStock && (
+                        {!trackQty && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                            不计数量
+                          </span>
+                        )}
+                        {effectiveOutOfStock && (
                           <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-red-100 text-red-700">
                           <X className="h-2.5 w-2.5" />
                           缺货
                         </span>
                         )}
                         {hasLowStock && (
-                          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${lowStockColor.border} ${lowStockColor.text} ${lowStockColor.bg}`} title={formatSellableDays(alert.sellableDays, alert.usesFallback)}>
+                          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${lowStockColor.border} ${lowStockColor.text} ${lowStockColor.bg}`} title={trackQty ? formatSellableDays(alert.sellableDays, alert.usesFallback) : '手动状态'}>
                             {lowStockColor.label}
-                            {!alert.usesFallback && alert.sellableDays != null && ` (${alert.sellableDays.toFixed(1)}天)`}
+                            {trackQty && !alert.usesFallback && alert.sellableDays != null && ` (${alert.sellableDays.toFixed(1)}天)`}
                           </span>
                         )}
                       </div>
@@ -1138,8 +1134,8 @@ export default function ProductsPage() {
                       </TableCell>
                     )}
                     <TableCell>
-                      <span className={`font-semibold ${isOutOfStock ? 'text-red-700' : hasLowStock ? lowStockColor.text : ''}`}>
-                        {totalQty}
+                      <span className={`font-semibold ${effectiveOutOfStock ? 'text-red-700' : hasLowStock ? lowStockColor.text : ''}`}>
+                        {trackQty ? totalQty : <span className="text-muted-foreground">—</span>}
                       </span>
                     </TableCell>
                     <TableCell className="min-w-[180px]">
@@ -1148,83 +1144,17 @@ export default function ProductsPage() {
                           <span className="text-muted-foreground text-xs">-</span>
                         ) : (
                           locations.map((loc, idx) => {
-                            const isUnalloc = !!loc.isUnallocated
-                            const editing = isUnalloc && editUnallocProductId === p.id
                             return (
                             <div
                               key={idx}
-                              className={`flex items-center gap-1 text-xs px-1.5 py-0.5 rounded ${
-                                isUnalloc ? 'bg-amber-50 border border-amber-200' : ''
-                              }`}
+                              className="flex items-center gap-1 text-xs px-1.5 py-0.5 rounded"
                             >
-                              {isUnalloc ? (
-                                <Package className="h-3 w-3 text-amber-600" />
-                              ) : (
-                                <MapPin className="h-3 w-3 text-muted-foreground" />
-                              )}
-                              <span
-                                className={`font-mono ${
-                                  isUnalloc ? 'text-amber-700 font-medium' : ''
-                                }`}
-                              >
-                                {loc.code}
-                              </span>
+                              <MapPin className="h-3 w-3 text-muted-foreground" />
+                              <span className="font-mono">{loc.code}</span>
                               {loc.warehouseName && (
                                 <span className="text-muted-foreground">({loc.warehouseName})</span>
                               )}
-                              {editing ? (
-                                <>
-                                  <input
-                                    type="number"
-                                    value={editUnallocQty}
-                                    onChange={(e) => setEditUnallocQty(e.target.value)}
-                                    className="w-14 h-5 rounded border border-amber-300 px-1 text-xs bg-white"
-                                    autoFocus
-                                  />
-                                  <button
-                                    type="button"
-                                    className="text-emerald-600 hover:text-emerald-800 px-0.5 font-bold"
-                                    onClick={() => {
-                                      const q = Number(editUnallocQty)
-                                      if (Number.isNaN(q) || q < 0) { toast.error('数量无效'); return }
-                                      updateUnalloc.mutate({ productId: p.id, qty: q })
-                                    }}
-                                  >✓</button>
-                                  <button
-                                    type="button"
-                                    className="text-muted-foreground hover:text-foreground px-0.5"
-                                    onClick={() => { setEditUnallocProductId(null); setEditUnallocQty('') }}
-                                  ><X className="h-3 w-3" /></button>
-                                </>
-                              ) : (
-                                <span
-                                  className={
-                                    isUnalloc ? 'text-amber-700 font-medium' : 'text-muted-foreground'
-                                  }
-                                >
-                                  : {loc.quantity}
-                                </span>
-                              )}
-                              {isUnalloc && canWrite() && !editing && (
-                                <>
-                                  <button
-                                    type="button"
-                                    className="text-amber-600 hover:text-amber-800 px-0.5"
-                                    title="修改暂未入仓数量"
-                                    onClick={() => { setEditUnallocProductId(p.id); setEditUnallocQty(String(loc.quantity)) }}
-                                  ><Edit2 className="h-2.5 w-2.5" /></button>
-                                  <button
-                                    type="button"
-                                    className="text-red-500 hover:text-red-700 px-0.5"
-                                    title="清零暂未入仓数量"
-                                    onClick={() => {
-                                      if (window.confirm('清零该产品的暂未入仓数量？')) {
-                                        updateUnalloc.mutate({ productId: p.id, qty: 0 })
-                                      }
-                                    }}
-                                  ><Trash2 className="h-2.5 w-2.5" /></button>
-                                </>
-                              )}
+                              {trackQty && <span className="text-muted-foreground">: {loc.quantity}</span>}
                             </div>
                             )
                           })
@@ -1233,9 +1163,7 @@ export default function ProductsPage() {
                           <div className="flex items-center gap-1 mt-1">
                             <LocationPicker
                               locations={allLocations || []}
-                              excludeIds={locations
-                                .filter((l: any) => !l.isUnallocated)
-                                .map((l: any) => l.id)}
+                              excludeIds={locations.map((l: any) => l.id)}
                               onSelect={(locId) => setInlineLocId(locId)}
                               placeholder="搜索库位..."
                               className="flex-1 min-w-[120px]"
@@ -1251,11 +1179,11 @@ export default function ProductsPage() {
                               type="button"
                               size="sm"
                               className="h-7 px-2"
-                              disabled={!inlineLocId || !inlineLocQty}
+                              disabled={!inlineLocQty}
                               onClick={() => {
                                 addInv.mutate({
                                   productId: p.id,
-                                  locationId: inlineLocId,
+                                  locationId: inlineLocId || null, // 不选库位→默认库位（addInv RPC 处理）
                                   quantity: Number(inlineLocQty),
                                 })
                               }}
@@ -1498,40 +1426,101 @@ export default function ProductsPage() {
                   </Button>
                 </div>
               </div>
+              <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+                {!hasTrackQtyCol || !hasManualStatusCol ? (
+                  <div className="md:col-span-2 border border-red-200 bg-red-50 rounded-lg p-3 flex gap-2 items-start">
+                    <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-bold text-red-800">当前数据库暂不支持「不计数量手动设置状态」功能</div>
+                      <div className="text-xs text-red-700 mt-1 mb-2">
+                        这是因为数据库还缺少 products 表的 <code className="bg-red-100 px-1 rounded">track_qty</code> / <code className="bg-red-100 px-1 rounded">manual_status</code> 列。
+                        需在 Supabase SQL Editor 执行迁移 0018 后，复选框和手动状态选择器才会出现。
+                      </div>
+                      <button
+                        type="button"
+                        className="text-xs text-red-700 underline hover:text-red-900 font-semibold"
+                        onClick={() => {
+                          navigator.clipboard?.writeText(`-- 复制以下内容到 Supabase SQL Editor 整段执行
+alter table public.products add column if not exists track_qty boolean not null default true;
+alter table public.products add column if not exists manual_status text check (manual_status is null or manual_status in ('normal', 'low_stock', 'out_of_stock'));
+alter table public.stock_moves add column if not exists operator_name text;
+comment on column public.stock_moves.operator_name is '实际出库/入库人姓名';`).then(
+                            () => toast.success('迁移 SQL 已复制到剪贴板，请贴到 Supabase SQL Editor 执行后刷新页面'),
+                            () => toast.error('复制失败，请手动从 /supabase/migrations/0018_track_qty_and_cleanup.sql 复制'),
+                          )
+                        }}
+                      >
+                        📋 点击复制需要执行的迁移 SQL（3 列补全版）
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-2 flex items-center gap-3 border rounded-lg p-3 bg-muted/30">
+                      <input
+                        id="track_qty"
+                        type="checkbox"
+                        className="h-5 w-5 accent-primary"
+                        checked={form.track_qty}
+                        onChange={(e) => {
+                          const checked = e.target.checked
+                          setForm({
+                            ...form,
+                            track_qty: checked,
+                            manual_status: checked ? null : (form.manual_status || 'normal'),
+                          })
+                          if (!checked) {
+                            toast.message('已关闭数量跟踪，请选择手动状态（正常/低库存/缺货）后保存', { duration: 3500 })
+                          }
+                        }}
+                      />
+                      <div className="flex-1">
+                        <Label htmlFor="track_qty" className="cursor-pointer">
+                          启用库存数量跟踪
+                        </Label>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          关闭后，状态手动选择（正常/低库存/缺货），不计具体库存数量
+                        </div>
+                      </div>
+                    </div>
+                    {!form.track_qty && (
+                      <div className="space-y-2">
+                        <Label>手动状态</Label>
+                        <select
+                          value={form.manual_status || 'normal'}
+                          onChange={(e) =>
+                            setForm({
+                              ...form,
+                              manual_status: e.target.value as 'normal' | 'low_stock' | 'out_of_stock',
+                            })
+                          }
+                          className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                          <option value="normal">正常</option>
+                          <option value="low_stock">低库存</option>
+                          <option value="out_of_stock">缺货</option>
+                        </select>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
               {!editing && (
                 <div className="md:col-span-2 space-y-4">
-                  <div className="space-y-2">
-                    <Label className="flex items-center gap-1">
-                      <Package className="h-3.5 w-3.5" />
-                      暂未入仓数量
-                      <span className="text-xs text-muted-foreground font-normal">
-                        （可选：有数量但暂时没确定库位时填这里）
-                      </span>
-                    </Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={createUnallocQty}
-                      onChange={(e) => setCreateUnallocQty(e.target.value)}
-                      placeholder="例：100"
-                      className="max-w-xs"
-                    />
-                  </div>
-
                   <div className="space-y-2">
                     <Label className="flex items-center gap-1">
                       <MapPin className="h-3.5 w-3.5" />
                       初始库位 + 数量
                       <span className="text-xs text-muted-foreground font-normal">
-                        （可选：已知道具体放哪里时填）
+                        （库位可选，不选库位时数量自动归入默认库位）
                       </span>
                     </Label>
                     <div className="flex items-center gap-2 flex-wrap">
                       <LocationPicker
                         locations={allLocations || []}
                         onSelect={(locId) => setCreateLocId(locId)}
-                        placeholder="搜索库位编码 / 仓库名..."
+                        placeholder="搜索库位编码 / 仓库名...（可留空）"
                         className="flex-1 min-w-64"
                       />
                       {createLocId && (
@@ -1547,7 +1536,6 @@ export default function ProductsPage() {
                         onChange={(e) => setCreateLocQty(e.target.value)}
                         placeholder="数量"
                         className="w-32"
-                        disabled={!createLocId}
                       />
                     </div>
                   </div>
@@ -1615,17 +1603,25 @@ export default function ProductsPage() {
                           <span className="text-xs text-muted-foreground flex-shrink-0">
                             {inv.location?.warehouse?.name || inv.location?.warehouse?.code || ''}
                           </span>
-                          <input
-                            type="number"
-                            className="flex-1 h-8 rounded-md border border-input bg-background px-2 text-sm"
-                            defaultValue={inv.quantity}
-                            onBlur={(e) => {
-                              const newQty = Number(e.target.value)
-                              if (newQty !== inv.quantity && newQty >= 0) {
-                                updateInvQty.mutate({ id: inv.id, quantity: newQty })
-                              }
-                            }}
-                          />
+                          {trackQtyOfEditing ? (
+                            <input
+                              type="number"
+                              className="flex-1 h-8 rounded-md border border-input bg-background px-2 text-sm"
+                              defaultValue={inv.quantity}
+                              onBlur={(e) => {
+                                const newQty = Number(e.target.value)
+                                if (newQty !== inv.quantity && newQty >= 0) {
+                                  updateInvQty.mutate({ id: inv.id, quantity: newQty })
+                                }
+                              }}
+                            />
+                          ) : (
+                            <div className="flex-1 flex items-center gap-1">
+                              <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                                不计数量
+                              </span>
+                            </div>
+                          )}
                           <button
                             type="button"
                             className="p-1 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors flex-shrink-0"
@@ -1656,20 +1652,27 @@ export default function ProductsPage() {
                         已选: {allLocations?.find((l) => l.id === newLocId)?.code}
                       </span>
                     )}
-                    <input
-                      type="number"
-                      value={newLocQty}
-                      onChange={(e) => setNewLocQty(e.target.value)}
-                      placeholder="数量"
-                      className="w-24 h-8 rounded-md border border-input bg-background px-2 text-sm"
-                    />
+                    {trackQtyOfEditing ? (
+                      <input
+                        type="number"
+                        value={newLocQty}
+                        onChange={(e) => setNewLocQty(e.target.value)}
+                        placeholder="数量"
+                        className="w-24 h-8 rounded-md border border-input bg-background px-2 text-sm"
+                      />
+                    ) : (
+                      <span className="inline-flex items-center px-2 h-8 rounded-md text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                        不计数量
+                      </span>
+                    )}
                     <Button
                       type="button"
                       size="sm"
-                      disabled={!newLocId || !newLocQty}
+                      disabled={!newLocId || (trackQtyOfEditing ? !newLocQty : false)}
                       onClick={() => {
                         if (editingProductId) {
-                          addInv.mutate({ productId: editingProductId, locationId: newLocId, quantity: Number(newLocQty) })
+                          const qty = trackQtyOfEditing ? Number(newLocQty) : 0
+                          addInv.mutate({ productId: editingProductId, locationId: newLocId, quantity: qty })
                         }
                       }}
                     >

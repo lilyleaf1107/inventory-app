@@ -267,32 +267,26 @@ export default function MaterialsPage() {
                     </span>
                   </TableCell>
                   <TableCell>{m.spec || '-'}</TableCell>
-                  <TableCell>
-                    {canWrite() ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className={
-                          m.is_out_of_stock_marked
-                            ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100'
-                            : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-100'
-                        }
-                        onClick={() =>
-                          toggleMarkedMutation.mutate({ id: m.id, value: !m.is_out_of_stock_marked })
-                        }
-                      >
-                        {m.is_out_of_stock_marked ? '缺货' : '正常'}
-                      </Button>
-                    ) : m.is_out_of_stock_marked ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-700 font-medium">
-                        <AlertTriangle className="h-3 w-3" />
+                  <TableCell
+                    className={canWrite() ? 'cursor-pointer select-none' : ''}
+                    onClick={() => {
+                      if (!canWrite()) return
+                      toggleMarkedMutation.mutate({ id: m.id, value: !m.is_out_of_stock_marked })
+                    }}
+                    title={canWrite() ? '点击切换状态（正常 / 缺货）' : ''}
+                  >
+                    {m.is_out_of_stock_marked ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-bold bg-red-100 text-red-700 border border-red-200 shadow-sm">
+                        <AlertTriangle className="h-4 w-4" />
                         缺货
                       </span>
                     ) : (
-                      <span className="inline-flex px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-600">
-                        正常
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm">
+                        ✓ 正常
                       </span>
+                    )}
+                    {canWrite() && (
+                      <span className="ml-2 text-[11px] text-slate-400 font-normal">点击切换</span>
                     )}
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">

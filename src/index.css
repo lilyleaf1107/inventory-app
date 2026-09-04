@@ -61,117 +61,117 @@
       放在 @layer 外以避免 Tailwind layer 排序问题
       使用 :root.theme-xxx 提高特异性确保覆盖默认 :root ========== */
 
-/* 浅绿 — 清新草绿调 */
+/* 浅绿 — 淡灰草绿 */
 :root.theme-lightgreen,
 html.theme-lightgreen,
 .theme-lightgreen {
-  --background: 140 45% 96%;
-  --foreground: 150 15% 15%;
-  --card: 140 55% 98%;
-  --card-foreground: 150 15% 15%;
-  --popover: 140 55% 98%;
-  --popover-foreground: 150 15% 15%;
-  --primary: 142 32% 55%;
-  --primary-foreground: 150 30% 98%;
-  --secondary: 140 40% 92%;
-  --secondary-foreground: 150 25% 20%;
-  --muted: 140 35% 94%;
-  --muted-foreground: 150 8% 42%;
-  --accent: 140 45% 89%;
-  --accent-foreground: 150 25% 20%;
-  --border: 140 30% 85%;
-  --input: 140 30% 85%;
-  --ring: 142 32% 55%;
+  --background: 150 25% 97%;
+  --foreground: 150 8% 22%;
+  --card: 150 30% 98.5%;
+  --card-foreground: 150 8% 22%;
+  --popover: 150 30% 98.5%;
+  --popover-foreground: 150 8% 22%;
+  --primary: 145 18% 52%;
+  --primary-foreground: 150 20% 98%;
+  --secondary: 150 18% 93%;
+  --secondary-foreground: 150 10% 28%;
+  --muted: 150 15% 95%;
+  --muted-foreground: 150 5% 48%;
+  --accent: 150 20% 91%;
+  --accent-foreground: 150 10% 26%;
+  --border: 150 12% 88%;
+  --input: 150 12% 88%;
+  --ring: 145 18% 52%;
 }
 
-/* 米白 — 温润米黄调 */
+/* 米白 — 灰调米黄 */
 :root.theme-ricewhite,
 html.theme-ricewhite,
 .theme-ricewhite {
-  --background: 48 55% 96%;
-  --foreground: 40 15% 18%;
-  --card: 48 70% 98%;
-  --card-foreground: 40 15% 18%;
-  --popover: 48 70% 98%;
-  --popover-foreground: 40 15% 18%;
-  --primary: 40 30% 55%;
-  --primary-foreground: 50 40% 98%;
-  --secondary: 48 40% 92%;
-  --secondary-foreground: 40 25% 22%;
-  --muted: 48 35% 94%;
-  --muted-foreground: 40 8% 45%;
-  --accent: 48 50% 88%;
-  --accent-foreground: 40 25% 22%;
-  --border: 48 30% 85%;
-  --input: 48 30% 85%;
-  --ring: 40 30% 55%;
+  --background: 45 30% 97%;
+  --foreground: 40 8% 22%;
+  --card: 45 40% 98.5%;
+  --card-foreground: 40 8% 22%;
+  --popover: 45 40% 98.5%;
+  --popover-foreground: 40 8% 22%;
+  --primary: 40 18% 50%;
+  --primary-foreground: 50 25% 98%;
+  --secondary: 45 20% 92%;
+  --secondary-foreground: 40 10% 28%;
+  --muted: 45 18% 94%;
+  --muted-foreground: 40 5% 48%;
+  --accent: 45 25% 90%;
+  --accent-foreground: 40 10% 26%;
+  --border: 45 15% 87%;
+  --input: 45 15% 87%;
+  --ring: 40 18% 50%;
 }
 
-/* 淡紫 — 柔和薰衣草 */
+/* 淡紫 — 雾灰薰衣草 */
 :root.theme-softpurple,
 html.theme-softpurple,
 .theme-softpurple {
-  --background: 260 45% 97%;
-  --foreground: 260 15% 18%;
-  --card: 260 60% 98%;
-  --card-foreground: 260 15% 18%;
-  --popover: 260 60% 98%;
-  --popover-foreground: 260 15% 18%;
-  --primary: 262 28% 62%;
-  --primary-foreground: 260 40% 98%;
-  --secondary: 260 35% 92%;
-  --secondary-foreground: 260 25% 22%;
-  --muted: 260 30% 94%;
-  --muted-foreground: 260 8% 45%;
-  --accent: 260 40% 89%;
-  --accent-foreground: 260 25% 22%;
-  --border: 260 25% 86%;
-  --input: 260 25% 86%;
-  --ring: 262 28% 62%;
+  --background: 260 25% 97.5%;
+  --foreground: 260 8% 22%;
+  --card: 260 35% 98.5%;
+  --card-foreground: 260 8% 22%;
+  --popover: 260 35% 98.5%;
+  --popover-foreground: 260 8% 22%;
+  --primary: 262 18% 55%;
+  --primary-foreground: 260 25% 98%;
+  --secondary: 260 20% 92%;
+  --secondary-foreground: 260 10% 28%;
+  --muted: 260 18% 94%;
+  --muted-foreground: 260 5% 48%;
+  --accent: 260 25% 90%;
+  --accent-foreground: 260 10% 26%;
+  --border: 260 15% 88%;
+  --input: 260 15% 88%;
+  --ring: 262 18% 55%;
 }
 
-/* 浅红 — 淡雅蜜桃粉 */
+/* 浅红 — 灰调陶土粉 */
 :root.theme-lightred,
 html.theme-lightred,
 .theme-lightred {
-  --background: 6 55% 97%;
-  --foreground: 6 15% 18%;
-  --card: 6 70% 98%;
-  --card-foreground: 6 15% 18%;
-  --popover: 6 70% 98%;
-  --popover-foreground: 6 15% 18%;
-  --primary: 4 35% 65%;
-  --primary-foreground: 6 40% 98%;
-  --secondary: 6 45% 92%;
-  --secondary-foreground: 6 25% 22%;
-  --muted: 6 40% 94%;
-  --muted-foreground: 6 8% 45%;
-  --accent: 6 50% 89%;
-  --accent-foreground: 6 25% 22%;
-  --border: 6 30% 86%;
-  --input: 6 30% 86%;
-  --ring: 4 35% 65%;
+  --background: 6 25% 97.5%;
+  --foreground: 6 8% 22%;
+  --card: 6 35% 98.5%;
+  --card-foreground: 6 8% 22%;
+  --popover: 6 35% 98.5%;
+  --popover-foreground: 6 8% 22%;
+  --primary: 6 20% 55%;
+  --primary-foreground: 6 25% 98%;
+  --secondary: 6 20% 92%;
+  --secondary-foreground: 6 10% 28%;
+  --muted: 6 18% 94%;
+  --muted-foreground: 6 5% 48%;
+  --accent: 6 25% 90%;
+  --accent-foreground: 6 10% 26%;
+  --border: 6 15% 88%;
+  --input: 6 15% 88%;
+  --ring: 6 20% 55%;
 }
 
-/* 淡蓝 — 晴空浅蓝调（默认） */
+/* 淡蓝 — 雾灰晴空蓝 */
 :root.theme-softblue,
 html.theme-softblue,
 .theme-softblue {
-  --background: 205 50% 97%;
-  --foreground: 210 15% 18%;
-  --card: 205 65% 98%;
-  --card-foreground: 210 15% 18%;
-  --popover: 205 65% 98%;
-  --popover-foreground: 210 15% 18%;
-  --primary: 205 30% 58%;
-  --primary-foreground: 210 40% 98%;
-  --secondary: 205 40% 92%;
-  --secondary-foreground: 210 25% 22%;
-  --muted: 205 35% 94%;
-  --muted-foreground: 210 8% 45%;
-  --accent: 205 45% 89%;
-  --accent-foreground: 210 25% 22%;
-  --border: 205 30% 86%;
-  --input: 205 30% 86%;
-  --ring: 205 30% 58%;
+  --background: 210 25% 97.5%;
+  --foreground: 210 8% 22%;
+  --card: 210 35% 98.5%;
+  --card-foreground: 210 8% 22%;
+  --popover: 210 35% 98.5%;
+  --popover-foreground: 210 8% 22%;
+  --primary: 208 18% 52%;
+  --primary-foreground: 210 25% 98%;
+  --secondary: 210 20% 92%;
+  --secondary-foreground: 210 10% 28%;
+  --muted: 210 18% 94%;
+  --muted-foreground: 210 5% 48%;
+  --accent: 210 25% 90%;
+  --accent-foreground: 210 10% 26%;
+  --border: 210 15% 88%;
+  --input: 210 15% 88%;
+  --ring: 208 18% 52%;
 }

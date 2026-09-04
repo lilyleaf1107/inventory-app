@@ -21,16 +21,21 @@ export interface Product {
   is_material_area: boolean
   cost: number | null
   on_shelf: boolean
-  unallocated_quantity: number
+  track_qty: boolean
+  manual_status: 'normal' | 'low_stock' | 'out_of_stock' | null
   created_at: string
   updated_at: string
 }
+
+export type MaterialStatus = 'normal' | 'low_stock' | 'out_of_stock'
 
 export interface Material {
   id: string
   name: string
   spec: string | null
-  is_out_of_stock_marked: boolean
+  /** @deprecated 使用 status 字段 */
+  is_out_of_stock_marked?: boolean
+  status: MaterialStatus
   created_at: string
   updated_at: string
 }
@@ -73,7 +78,10 @@ export interface StockMove {
   scan_mode: 'manual' | 'scan'
   batch_no: string | null
   remark: string | null
-  operator_id: string
+  operator_id: string | null
+  operator_name: string | null
+  tracking_no: string | null
+  is_offline: boolean | null
   created_at: string
 }
 

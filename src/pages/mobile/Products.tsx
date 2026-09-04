@@ -14,9 +14,11 @@ import {
   MapPin,
   Package,
   ArrowUp,
+  AlertTriangle,
 } from 'lucide-react'
 import {
   supabase,
+  columnsExists,
   getProductImageUrl,
   uploadProductImage,
   deleteProductImage,
@@ -65,6 +67,8 @@ interface ProductForm {
   imagePreview: string | null
   selectedTagIds: string[]
   newTagName: string
+  track_qty: boolean
+  manual_status: 'normal' | 'low_stock' | 'out_of_stock' | null
 }
 
 const emptyForm: ProductForm = {
@@ -80,6 +84,8 @@ const emptyForm: ProductForm = {
   imagePreview: null,
   selectedTagIds: [],
   newTagName: '',
+  track_qty: true,
+  manual_status: null,
 }
 
 function getTagColor(index: number) {
@@ -95,6 +101,17 @@ export default function MobileProducts() {
   const [searchParams, setSearchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const { canWrite, canViewCost } = useAuthStore()
+
+  // 🛡 探测 products 新列是否存在（兼容未执行 0018 迁移的环境）
+  const { data: productCols } = useQuery({
+    queryKey: ['col-probe-products-track_manual-mobile'],
+    queryFn: () => columnsExists('products', ['track_qty', 'manual_status', 'unallocated_quantity']),
+    staleTime: Infinity,
+  })
+  const hasTrackQtyCol = productCols?.['track_qty'] !== false
+  const hasManualStatusCol = productCols?.['manual_status'] !== false
+  const hasUnallocCol = productCols?.['unallocated_quantity'] !== false
+
   const [search, setSearch] = useState('')
   const deferredSearch = useDeferredValue(search)
   const [categoryFilter, setCategoryFilter] = useState('')
@@ -218,7 +235,8 @@ export default function MobileProducts() {
     staleTime: 30 * 1000,
   })
 
-  // 编辑时加载该产品的库存明细
+  // 编辑时加载该产品的库存明细（是否不计数量决定显示数字还是「不计数量」badge）
+  const trackQtyOfEditing = editing ? ((editing as any).track_qty !== false) : true
   const { data: productInventory } = useQuery({
     queryKey: ['product-inventory-edit', editingProductId],
     enabled: !!editingProductId,
@@ -306,21 +324,28 @@ export default function MobileProducts() {
       if (data.imageFile) {
         imagePath = await uploadProductImage(data.imageFile)
       }
+      // 🛡 兼容：列不存在则跳过写入
+      const cols = await columnsExists('products', ['track_qty', 'manual_status', 'unallocated_quantity'])
+      const insertPayload: Record<string, any> = {
+        sku: data.sku || null,
+        name: data.name,
+        barcode: data.barcode || null,
+        category: data.category || null,
+        spec: data.spec || null,
+        unit: data.unit,
+        cost: data.cost ? Number(data.cost) : null,
+        image_path: imagePath,
+        description: data.description || null,
+        on_shelf: true,
+      }
+      if (cols.unallocated_quantity) {
+        insertPayload.unallocated_quantity = unallocatedQty > 0 ? unallocatedQty : 0
+      }
+      if (cols.track_qty) insertPayload.track_qty = data.track_qty
+      if (cols.manual_status) insertPayload.manual_status = data.track_qty ? null : (data.manual_status || null)
       const { data: product, error } = await supabase
         .from('products')
-        .insert({
-          sku: data.sku || null,
-          name: data.name,
-          barcode: data.barcode || null,
-          category: data.category || null,
-          spec: data.spec || null,
-          unit: data.unit,
-          cost: data.cost ? Number(data.cost) : null,
-          image_path: imagePath,
-          description: data.description || null,
-          on_shelf: true,
-          unallocated_quantity: unallocatedQty > 0 ? unallocatedQty : 0,
-        })
+        .insert(insertPayload)
         .select()
         .single()
       if (error) {
@@ -368,20 +393,25 @@ export default function MobileProducts() {
           await deleteProductImage(data.oldImagePath)
         }
       }
+      // 🛡 兼容：列不存在则跳过更新
+      const cols = await columnsExists('products', ['track_qty', 'manual_status'])
+      const updatePayload: Record<string, any> = {
+        sku: data.form.sku || null,
+        name: data.form.name,
+        barcode: data.form.barcode || null,
+        category: data.form.category || null,
+        spec: data.form.spec || null,
+        unit: data.form.unit,
+        cost: data.form.cost ? Number(data.form.cost) : null,
+        image_path: imagePath,
+        description: data.form.description || null,
+        updated_at: new Date().toISOString(),
+      }
+      if (cols.track_qty) updatePayload.track_qty = data.form.track_qty
+      if (cols.manual_status) updatePayload.manual_status = data.form.track_qty ? null : (data.form.manual_status || null)
       const { error } = await supabase
         .from('products')
-        .update({
-          sku: data.form.sku || null,
-          name: data.form.name,
-          barcode: data.form.barcode || null,
-          category: data.form.category || null,
-          spec: data.form.spec || null,
-          unit: data.form.unit,
-          cost: data.form.cost ? Number(data.form.cost) : null,
-          image_path: imagePath,
-          description: data.form.description || null,
-          updated_at: new Date().toISOString(),
-        })
+        .update(updatePayload)
         .eq('id', data.id)
       if (error) throw error
 
@@ -739,6 +769,8 @@ export default function MobileProducts() {
       imagePreview: product.image_path ? getProductImageUrl(product.image_path) : null,
       selectedTagIds: [],
       newTagName: '',
+      track_qty: (product as any).track_qty !== false,
+      manual_status: (product as any).manual_status || null,
     })
 
     const { data: productTags, error } = await supabase
@@ -981,11 +1013,18 @@ export default function MobileProducts() {
         ) : (
           pagedProducts?.map((p) => {
             const productTags = getProductTags(p)
+            const trackQty = (p as any).track_qty !== false
+            const manualStatus: 'normal' | 'low_stock' | 'out_of_stock' | null = (p as any).manual_status || null
             const totalQty = productQtyMap?.get(p.id) || 0
-            const isOutOfStock = totalQty === 0
+            const isOutOfStock = trackQty ? totalQty === 0 : manualStatus === 'out_of_stock'
             const out30d = velocityMap?.get(p.id) || 0
             const alert = calcStockAlert(totalQty, out30d)
-            const lowStockLevel = alert.level
+            let lowStockLevel = alert.level
+            if (!trackQty) {
+              lowStockLevel = manualStatus === 'out_of_stock' ? 'critical'
+                : manualStatus === 'low_stock' ? 'warning'
+                : 'normal'
+            }
             const lowStockColor = getLowStockLevelColor(lowStockLevel)
             const hasLowStock = lowStockLevel !== 'normal' && !isOutOfStock
             const locations = productLocationsMap?.get(p.id) || []
@@ -1011,6 +1050,11 @@ export default function MobileProducts() {
                       <div className="flex items-start justify-between gap-2">
                         <div className="font-medium text-sm truncate flex-1 flex flex-wrap items-center gap-1">
                           {p.name}
+                          {!trackQty && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                              不计数量
+                            </span>
+                          )}
                           {isOutOfStock && (
                             <span className="px-1 py-0.5 rounded text-[10px] font-medium bg-red-100 text-red-700">
                               缺货
@@ -1019,10 +1063,10 @@ export default function MobileProducts() {
                           {hasLowStock && (
                             <span
                               className={`px-1 py-0.5 rounded text-[10px] font-medium border ${lowStockColor.border} ${lowStockColor.text} ${lowStockColor.bg}`}
-                              title={formatSellableDays(alert.sellableDays, alert.usesFallback)}
+                              title={trackQty ? formatSellableDays(alert.sellableDays, alert.usesFallback) : '手动状态'}
                             >
                               {lowStockColor.label}
-                              {!alert.usesFallback && alert.sellableDays != null && ` (${alert.sellableDays.toFixed(1)}天)`}
+                              {trackQty && !alert.usesFallback && alert.sellableDays != null && ` (${alert.sellableDays.toFixed(1)}天)`}
                             </span>
                           )}
                         </div>
@@ -1051,9 +1095,9 @@ export default function MobileProducts() {
                       <div className="mt-1.5 flex flex-wrap gap-1.5 items-center text-xs">
                         <span className="text-muted-foreground">库存:</span>
                         <span className={`font-semibold ${isOutOfStock ? 'text-red-700' : hasLowStock ? lowStockColor.text : ''}`}>
-                          {totalQty}
+                          {trackQty ? totalQty : <span className="text-muted-foreground">—</span>}
                         </span>
-                        {p.unit && <span className="text-muted-foreground">{p.unit}</span>}
+                        {trackQty && p.unit && <span className="text-muted-foreground">{p.unit}</span>}
                         {canWrite() ? (
                           <Button
                             type="button"
@@ -1126,11 +1170,13 @@ export default function MobileProducts() {
                                     ><X className="h-2.5 w-2.5" /></button>
                                   </>
                                 ) : (
-                                  <span className={isUnalloc ? 'text-amber-700 font-medium' : ''}>
-                                    : {loc.quantity}
-                                  </span>
+                                  trackQty && (
+                                    <span className={isUnalloc ? 'text-amber-700 font-medium' : ''}>
+                                      : {loc.quantity}
+                                    </span>
+                                  )
                                 )}
-                                {isUnalloc && canWrite() && !editing && (
+                                {isUnalloc && canWrite() && !editing && trackQty && (
                                   <>
                                     <button
                                       type="button"
@@ -1469,7 +1515,76 @@ export default function MobileProducts() {
                 </div>
               </div>
 
-              {!editing && (
+              {/* 启用库存数量跟踪 + 手动状态 */}
+              {!hasTrackQtyCol || !hasManualStatusCol ? (
+                <div className="border border-red-200 bg-red-50 rounded-lg p-3 flex gap-2 items-start">
+                  <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-bold text-red-800">数据库暂不支持此功能</div>
+                    <div className="text-xs text-red-700 mt-1 mb-2">
+                      缺少 <code className="bg-red-100 px-1 rounded">track_qty</code> / <code className="bg-red-100 px-1 rounded">manual_status</code> 列，请先在 Supabase SQL Editor 执行迁移 0018。
+                    </div>
+                    <button
+                      type="button"
+                      className="text-xs text-red-700 underline font-semibold"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(`alter table public.products add column if not exists track_qty boolean not null default true;
+alter table public.products add column if not exists manual_status text check (manual_status is null or manual_status in ('normal', 'low_stock', 'out_of_stock'));
+alter table public.stock_moves add column if not exists operator_name text;`).then(
+                          () => toast.success('迁移SQL已复制，粘贴到Supabase执行后刷新'),
+                          () => toast.error('复制失败'),
+                        )
+                      }}
+                    >📋 点此复制迁移SQL</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3 rounded-lg border p-3 bg-muted/30">
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 h-4 w-4 accent-primary"
+                      checked={form.track_qty}
+                      onChange={(e) => {
+                        const checked = e.target.checked
+                        setForm({
+                          ...form,
+                          track_qty: checked,
+                          manual_status: checked ? null : (form.manual_status || 'normal'),
+                        })
+                        if (!checked) toast.message('已关闭数量跟踪，请选手动状态后保存')
+                      }}
+                    />
+                    <div className="flex-1">
+                      <div className="text-sm font-medium">启用库存数量跟踪</div>
+                      <div className="text-[11px] text-muted-foreground mt-0.5">
+                        关闭后，不计具体库存数量，手动设置状态
+                      </div>
+                    </div>
+                  </label>
+                  {!form.track_qty && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">手动状态</Label>
+                      <select
+                        value={form.manual_status || 'normal'}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            manual_status: e.target.value as 'normal' | 'low_stock' | 'out_of_stock',
+                          })
+                        }
+                        className="w-full h-9 rounded-md border border-input bg-background px-2 text-sm"
+                      >
+                        <option value="normal">正常</option>
+                        <option value="low_stock">低库存</option>
+                        <option value="out_of_stock">缺货</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!editing && hasUnallocCol && (
                 <div className="space-y-4">
                   <div className="space-y-2">
                     <Label className="flex items-center gap-1">
@@ -1544,17 +1659,23 @@ export default function MobileProducts() {
                           <span className="text-xs text-muted-foreground flex-shrink-0 truncate flex-1 min-w-0">
                             {inv.location?.warehouse?.name || inv.location?.warehouse?.code || ''}
                           </span>
-                          <input
-                            type="number"
-                            className="w-16 h-7 rounded-md border border-input bg-background px-1.5 text-xs"
-                            defaultValue={inv.quantity}
-                            onBlur={(e) => {
-                              const newQty = Number(e.target.value)
-                              if (newQty !== inv.quantity && newQty >= 0) {
-                                updateInvQty.mutate({ id: inv.id, quantity: newQty })
-                              }
-                            }}
-                          />
+                          {trackQtyOfEditing ? (
+                            <input
+                              type="number"
+                              className="w-16 h-7 rounded-md border border-input bg-background px-1.5 text-xs"
+                              defaultValue={inv.quantity}
+                              onBlur={(e) => {
+                                const newQty = Number(e.target.value)
+                                if (newQty !== inv.quantity && newQty >= 0) {
+                                  updateInvQty.mutate({ id: inv.id, quantity: newQty })
+                                }
+                              }}
+                            />
+                          ) : (
+                            <span className="inline-flex items-center px-1.5 h-7 rounded-md text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-200 flex-shrink-0">
+                              不计数量
+                            </span>
+                          )}
                           <button
                             type="button"
                             className="p-1 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors flex-shrink-0"
@@ -1589,21 +1710,28 @@ export default function MobileProducts() {
                           </option>
                         ))}
                     </select>
-                    <input
-                      type="number"
-                      value={newLocQty}
-                      onChange={(e) => setNewLocQty(e.target.value)}
-                      placeholder="数量"
-                      className="w-16 h-7 rounded-md border border-input bg-background px-1.5 text-xs"
-                    />
+                    {trackQtyOfEditing ? (
+                      <input
+                        type="number"
+                        value={newLocQty}
+                        onChange={(e) => setNewLocQty(e.target.value)}
+                        placeholder="数量"
+                        className="w-16 h-7 rounded-md border border-input bg-background px-1.5 text-xs"
+                      />
+                    ) : (
+                      <span className="inline-flex items-center px-1.5 h-7 rounded-md text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-200 flex-shrink-0">
+                        不计数量
+                      </span>
+                    )}
                     <Button
                       type="button"
                       size="sm"
                       className="h-7 px-2 text-xs flex-shrink-0"
-                      disabled={!newLocId || !newLocQty}
+                      disabled={!newLocId || (trackQtyOfEditing ? !newLocQty : false)}
                       onClick={() => {
                         if (editingProductId) {
-                          addInv.mutate({ productId: editingProductId, locationId: newLocId, quantity: Number(newLocQty) })
+                          const qty = trackQtyOfEditing ? Number(newLocQty) : 0
+                          addInv.mutate({ productId: editingProductId, locationId: newLocId, quantity: qty })
                         }
                       }}
                     >

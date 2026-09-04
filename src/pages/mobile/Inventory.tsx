@@ -35,6 +35,8 @@ interface InventoryItem {
     min_stock: number
     is_material_area: boolean
     category: string | null
+    track_qty?: boolean
+    manual_status?: 'normal' | 'low_stock' | 'out_of_stock' | null
   }
   location: {
     id: string
@@ -117,7 +119,7 @@ export default function MobileInventory() {
         .select(
           `
           id, quantity, batch_no,
-          product:products ( id, name, sku, barcode, image_path, unit, min_stock, is_material_area, category ),
+          product:products ( id, name, sku, barcode, image_path, unit, min_stock, is_material_area, category, track_qty, manual_status ),
           location:locations ( id, code, warehouse:warehouses ( id, code, name ) )
         `,
         )
@@ -146,12 +148,21 @@ export default function MobileInventory() {
   // 统计
   const stats = useMemo(() => {
     if (!inventory) return null
-    const totalQty = inventory.reduce((s, i) => s + Number(i.quantity), 0)
+    const totalQty = inventory.reduce((s, i) => {
+      const track = i.product?.track_qty !== false
+      return s + (track ? Number(i.quantity) : 0)
+    }, 0)
     const skuCount = new Set(inventory.map((i) => i.product.id)).size
-    const lowCount = inventory.filter(
-      (i) => getLowStockLevel(i.quantity) !== 'normal' && i.quantity > 0,
-    ).length
-    const outCount = inventory.filter((i) => i.quantity === 0).length
+    const lowCount = inventory.filter((i) => {
+      const track = i.product?.track_qty !== false
+      if (!track) return i.product?.manual_status === 'low_stock'
+      return getLowStockLevel(i.quantity) !== 'normal' && i.quantity > 0
+    }).length
+    const outCount = inventory.filter((i) => {
+      const track = i.product?.track_qty !== false
+      if (!track) return i.product?.manual_status === 'out_of_stock'
+      return i.quantity === 0
+    }).length
     return { totalQty, skuCount, lowCount, outCount }
   }, [inventory])
 
@@ -317,14 +328,19 @@ export default function MobileInventory() {
       ) : (
         <div className="space-y-2">
           {pagedInventory?.map((item) => {
-            const isOutOfStock = item.quantity === 0
+            const trackQty = item.product?.track_qty !== false
+            const manualStatus = item.product?.manual_status || null
+            const isOutOfStock = trackQty ? item.quantity === 0 : manualStatus === 'out_of_stock'
             const isMaterial = item.product.is_material_area
-            const lowStockLevel = getLowStockLevel(item.quantity)
+            const lowStockLevel = !trackQty
+              ? (manualStatus === 'low_stock' ? 'warning' : 'normal')
+              : getLowStockLevel(item.quantity)
             const lowStockColor = getLowStockLevelColor(lowStockLevel)
             const hasLowStock = lowStockLevel !== 'normal' && !isOutOfStock
             let cardClass = 'bg-background border'
             if (isOutOfStock) cardClass = 'bg-red-50/60 border-red-200'
             else if (hasLowStock) cardClass = `${lowStockColor.border} ${lowStockColor.bg}`
+            else if (!trackQty) cardClass = 'bg-slate-50/60 border-slate-200'
             return (
               <div
                 key={item.id}
@@ -362,6 +378,11 @@ export default function MobileInventory() {
                         {lowStockColor.label}
                       </span>
                     )}
+                    {!trackQty && (
+                      <span className="px-1 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                        不计数量
+                      </span>
+                    )}
                   </div>
                   <div className="mt-0.5">
                     <div className="font-mono text-sm font-bold text-foreground">
@@ -380,6 +401,10 @@ export default function MobileInventory() {
                 <div className="text-right flex-shrink-0">
                   {isMaterial ? (
                     <div className="font-medium text-muted-foreground">***</div>
+                  ) : !trackQty ? (
+                    <span className="inline-flex items-center px-1.5 py-1 rounded-md text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                      不计数量
+                    </span>
                   ) : (
                     <>
                       <div className={`font-bold ${isOutOfStock ? 'text-red-600' : ''}`}>

@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { Home, ScanLine, Search, List, User, LogOut } from 'lucide-react'
+import { Home, ArrowUpFromLine, Search, List, User, LogOut } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 import { cn } from '@/lib/utils'
 import { ROLE_LABELS } from '@/lib/permissions'
@@ -9,7 +9,7 @@ import BackToTop from '@/components/BackToTop'
 
 const allTabs = [
   { to: '/m', label: '首页', icon: Home, end: true, requireWrite: false },
-  { to: '/m/scan', label: '扫码', icon: ScanLine, requireWrite: true },
+  { to: '/m/stock-out', label: '出库', icon: ArrowUpFromLine, requireWrite: true },
   { to: '/m/inventory', label: '库存', icon: Search, requireWrite: false },
   { to: '/m/moves', label: '记录', icon: List, requireWrite: true },
   { to: '/m/profile', label: '我的', icon: User, requireWrite: false },

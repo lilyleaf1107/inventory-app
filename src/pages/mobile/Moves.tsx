@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -7,6 +8,8 @@ import {
   ChevronRight,
   Copy,
   Package,
+  Pencil,
+  Check,
   Search,
   Store,
   Truck,
@@ -16,6 +19,10 @@ import {
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { buildPageRange, cn, formatDate, scrollToTopOfPage } from '@/lib/utils'
 
 type MoveRow = {
@@ -27,19 +34,12 @@ type MoveRow = {
   remark: string | null
   tracking_no?: string | null
   is_offline?: boolean | null
+  operator_name?: string | null
   created_at: string
   product: { id: string; name: string; sku: string | null; unit: string }
   location: { id: string; code: string; warehouse: { id: string; code: string; name: string | null } }
   operator?: { id: string; name: string | null } | null
 }
-
-const GROUP_PAGE_SIZE = 12 // 移动端：每组卡片比较高，每页 12 组
-const GROUP_TYPE = {
-  OUT_ONLINE: 'online_out',
-  OUT_OFFLINE: 'offline_out',
-  OUT_OTHER: 'other_out',
-  IN: 'in',
-} as const
 
 type Group = {
   key: string
@@ -54,6 +54,14 @@ type Group = {
   badgeLabel: string
 }
 
+const GROUP_PAGE_SIZE = 12 // 移动端：每组卡片比较高，每页 12 组
+const GROUP_TYPE = {
+  OUT_ONLINE: 'online_out',
+  OUT_OFFLINE: 'offline_out',
+  OUT_OTHER: 'other_out',
+  IN: 'in',
+} as const
+
 function shipInfo(m: MoveRow): { type: 'online' | 'offline' | 'other'; ref: string } {
   if (m.move_type !== 'out') return { type: 'other', ref: '—' }
   if (typeof m.is_offline === 'boolean' && m.is_offline) {
@@ -66,6 +74,7 @@ function shipInfo(m: MoveRow): { type: 'online' | 'offline' | 'other'; ref: stri
 }
 
 export default function MobileMoves() {
+  const queryClient = useQueryClient()
   const [typeFilter, setTypeFilter] = useState<'all' | 'in' | 'out'>('all')
   const [shipModeFilter, setShipModeFilter] = useState<'all' | 'online' | 'offline'>('all')
   const [trackingSearch, setTrackingSearch] = useState('')
@@ -74,17 +83,24 @@ export default function MobileMoves() {
   const [showSearch, setShowSearch] = useState(false)
   const [expanded, setExpanded] = useState<Record<string, boolean> | 'all-on' | 'all-off'>('all-on')
   const [copyToast, setCopyToast] = useState('')
-  const [page, setPage] = useState(1) // 🆕 组分页
+  const [page, setPage] = useState(1)
+
+  // 组级编辑
+  const [editingGroup, setEditingGroup] = useState<Group | null>(null)
+  const [editShipMode, setEditShipMode] = useState<'online' | 'offline' | 'other'>('other')
+  const [editTrackingNo, setEditTrackingNo] = useState('')
+  const [editRemark, setEditRemark] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
 
   const { data: moves, isLoading, error, refetch } = useQuery({
     queryKey: ['m-stock-moves-v2', typeFilter, shipModeFilter, trackingSearch],
     queryFn: async () => {
-      // 基础查询：稳定字段，避免 tracking_no / is_offline 列不存在报错
-      // 重要：先链式追加所有 filter 和 limit，最后才 await（否则返回对象没有 .eq/.limit 方法）
+      // 稳定字段直接查：tracking_no / is_offline / operator_name
       let qb = supabase
         .from('stock_moves')
         .select(`
           id, move_type, quantity, scan_mode, batch_no, remark, created_at,
+          tracking_no, is_offline, operator_name,
           product:products(id, name, sku, unit),
           location:locations(id, code, warehouse:warehouses(id, code, name)),
           operator:profiles!stock_moves_operator_id_fkey(id, name)
@@ -95,23 +111,6 @@ export default function MobileMoves() {
       const { data, error: err } = await qb
       if (err) throw err
       const rows = (data || []) as MoveRow[]
-
-      // 尝试补查 tracking_no / is_offline
-      if (rows.length > 0) {
-        try {
-          const extra = await supabase
-            .from('stock_moves')
-            .select('id, tracking_no, is_offline')
-            .in('id', rows.map((r) => r.id))
-          if (!extra.error && extra.data) {
-            const m = new Map((extra.data as any[]).map((d) => [d.id, d]))
-            for (const r of rows) {
-              const d = m.get(r.id)
-              if (d) { (r as any).tracking_no = d.tracking_no; (r as any).is_offline = d.is_offline }
-            }
-          }
-        } catch { /* 列不存在则忽略 */ }
-      }
       const s = search?.toLowerCase() || ''
       const ts = trackingSearch?.toLowerCase() || ''
       return rows.filter((r) => {
@@ -259,7 +258,8 @@ export default function MobileMoves() {
   }
 
   return (
-    <div className="p-3 space-y-3 pb-24">
+    <>
+      <div className="p-3 space-y-3 pb-24">
       {copyToast && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 text-xs bg-slate-900/90 text-white px-3 py-2 rounded-lg shadow-xl">
           ✓ {copyToast}
@@ -425,7 +425,16 @@ export default function MobileMoves() {
             const open = isOpen(g.key)
             const Icon = g.icon
             const isIn = g.type === GROUP_TYPE.IN
-            const operatorName = g.items[0]?.operator?.name || '—'
+            const operatorName = g.items[0]?.operator_name || g.items[0]?.operator?.name || '—'
+            const openEdit = (e: React.MouseEvent) => {
+              e.stopPropagation()
+              setEditingGroup(g)
+              const first = g.items[0]
+              if (g.type === GROUP_TYPE.OUT_ONLINE) { setEditShipMode('online'); setEditTrackingNo(first?.tracking_no || g.title || '') }
+              else if (g.type === GROUP_TYPE.OUT_OFFLINE) { setEditShipMode('offline'); setEditTrackingNo('') }
+              else { setEditShipMode('other'); setEditTrackingNo(first?.tracking_no || '') }
+              setEditRemark(first?.remark || '')
+            }
             const accentBg =
               g.accent === 'blue' ? 'bg-gradient-to-br from-blue-100 to-indigo-100 text-blue-700' :
               g.accent === 'purple' ? 'bg-gradient-to-br from-purple-100 to-fuchsia-100 text-purple-700' :
@@ -501,10 +510,18 @@ export default function MobileMoves() {
                       </div>
                     </div>
 
-                    {/* 右侧大号数量（一眼看到出库多少件） */}
-                    <div className={cn('text-[22px] font-black tabular-nums leading-none pt-1 flex-shrink-0',
-                      isIn ? 'text-green-700' : 'text-orange-700')}>
-                      {isIn ? '+' : '-'}{g.totalQty.toLocaleString()}
+                    {/* 右侧：大号数量 + 编辑按钮 */}
+                    <div className="flex flex-col items-end gap-1 flex-shrink-0 pt-1">
+                      <div className={cn('text-[22px] font-black tabular-nums leading-none',
+                        isIn ? 'text-green-700' : 'text-orange-700')}>
+                        {isIn ? '+' : '-'}{g.totalQty.toLocaleString()}
+                      </div>
+                      <button
+                        onClick={openEdit}
+                        className="text-[10px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-md px-1.5 py-0.5 inline-flex items-center gap-0.5 transition-colors"
+                      >
+                        <Pencil className="h-3 w-3" /> 编辑
+                      </button>
                     </div>
                   </div>
                 </button>
@@ -581,7 +598,7 @@ export default function MobileMoves() {
         </div>
       )}
 
-      {/* 🆕 组分页条（移动端紧凑版：一页 12 组，宽展开 ±3） */}
+      {/* 组分页条 */}
       {totalPages > 1 && (
         <div className="px-1 flex items-center justify-center gap-1 flex-wrap text-xs pb-4">
           <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(1); scrollToTopOfPage() }}>首页</Button>
@@ -602,5 +619,94 @@ export default function MobileMoves() {
         </div>
       )}
     </div>
+
+    {/* 编辑对话框：改备注 / 补单号 / 切线上线下 */}
+    <Dialog open={!!editingGroup} onOpenChange={(o) => !o && setEditingGroup(null)}>
+      <DialogContent className="sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Pencil className="h-4 w-4 text-indigo-600" />
+            编辑订单
+            <span className="text-xs font-normal text-muted-foreground ml-1">
+              （{editingGroup?.items.length || 0} 条流水）
+            </span>
+          </DialogTitle>
+        </DialogHeader>
+        {editingGroup && editingGroup.type !== GROUP_TYPE.IN && (
+          <div className="space-y-2">
+            <Label className="text-xs">出库方式</Label>
+            <div className="grid grid-cols-3 gap-2">
+              {(['online','offline','other'] as const).map((m) => {
+                const active = editShipMode === m
+                const texts = { online: '线上快递', offline: '线下交易', other: '其他出库' }
+                return (
+                  <button key={m} type="button"
+                    onClick={() => setEditShipMode(m)}
+                    className={`p-2.5 rounded-xl border-2 text-xs font-semibold transition ${
+                      active
+                        ? m === 'online' ? 'bg-blue-50 border-blue-500 text-blue-800'
+                        : m === 'offline' ? 'bg-emerald-50 border-emerald-500 text-emerald-800'
+                        : 'bg-slate-100 border-slate-500 text-slate-800'
+                        : 'bg-background border-border text-muted-foreground hover:bg-muted/40'
+                    }`}
+                  >{texts[m]}</button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+        <div className="space-y-2 mt-3">
+          <Label htmlFor="m_edit_tracking_no" className="text-xs">快递单号 {editShipMode !== 'online' && <span className="text-muted-foreground">（选填）</span>}</Label>
+          <Input id="m_edit_tracking_no"
+            disabled={editShipMode === 'offline'}
+            value={editShipMode === 'offline' ? '（线下，不写单号）' : editTrackingNo}
+            onChange={(e) => setEditTrackingNo(e.target.value)}
+            placeholder="例如：SF1234567890"
+            className="h-10"
+          />
+        </div>
+        <div className="space-y-2 mt-3">
+          <Label htmlFor="m_edit_remark" className="text-xs">备注 <span className="text-muted-foreground">（会覆盖本组所有流水的备注）</span></Label>
+          <Textarea id="m_edit_remark" value={editRemark} onChange={(e) => setEditRemark(e.target.value)}
+            rows={3} placeholder="例如：客户自提 / 赠品 / 补录单号"
+            className="text-sm"
+          />
+        </div>
+        <DialogFooter className="mt-4">
+          <Button variant="ghost" size="sm" onClick={() => setEditingGroup(null)} disabled={savingEdit}>
+            <X className="h-3.5 w-3.5 mr-1" /> 取消
+          </Button>
+          <Button size="sm" disabled={savingEdit} onClick={async () => {
+            const g = editingGroup
+            if (!g) return
+            setSavingEdit(true)
+            try {
+              const ids = g.items.map((m) => m.id)
+              const patch: Record<string, any> = {}
+              if (g.type !== GROUP_TYPE.IN) {
+                patch.tracking_no = editShipMode === 'online' ? (editTrackingNo.trim() || null) : null
+                patch.is_offline = editShipMode === 'offline' ? true : (editShipMode === 'online' ? false : g.items[0]?.is_offline ?? null)
+              }
+              patch.remark = editRemark.trim() || null
+              const { error } = await supabase.from('stock_moves').update(patch).in('id', ids)
+              if (error) throw error
+              toast.success('✅ 已保存')
+              setEditingGroup(null)
+              await queryClient.invalidateQueries({ queryKey: ['m-stock-moves-v2'] })
+              await queryClient.invalidateQueries({ queryKey: ['stock-moves-v2'] })
+              await queryClient.invalidateQueries({ queryKey: ['sales-velocity-30d'] })
+            } catch (e: any) {
+              console.error('[移动编辑订单失败]', e)
+              toast.error(e?.message || '保存失败')
+            } finally {
+              setSavingEdit(false)
+            }
+          }}>
+            <Check className="h-3.5 w-3.5 mr-1" /> {savingEdit ? '保存中...' : '保存'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }

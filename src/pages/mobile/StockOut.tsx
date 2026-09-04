@@ -72,6 +72,21 @@ export default function MobileStockOut() {
   const [trackingBound, setTrackingBound] = useState(false)
   const [offlineNote, setOfflineNote] = useState('')
   const [remark, setRemark] = useState('')
+  const [operatorName, setOperatorName] = useState('')
+  const { data: profileList = [] } = useQuery({
+    queryKey: ['profiles-drop-stockout'],
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('profiles').select('id, name')
+      if (error) throw error
+      return (data || []).filter((x: any) => !!x?.name) as { id: string; name: string }[]
+    },
+  })
+  const operatorListOptions = useMemo(() => {
+    const base = profileList.map((p) => p.name)
+    if (operatorName && !base.includes(operatorName)) base.unshift(operatorName)
+    return Array.from(new Set(base)).filter(Boolean)
+  }, [profileList, operatorName])
 
   // ==== 当前加产品阶段 ====
   const [activeProduct, setActiveProduct] = useState<Product | null>(null)
@@ -119,7 +134,6 @@ export default function MobileStockOut() {
           )
         `)
         .eq('product_id', activeProduct!.id)
-        .gt('quantity', 0)
         .order('updated_at', { ascending: false })
       if (error) throw error
       return data as (Inventory & {
@@ -174,18 +188,19 @@ export default function MobileStockOut() {
     const locLabel = `${loc?.warehouse?.code || ''} / ${loc?.code || '库位'}`
 
     setLines((prev) => {
+      const trackQty = (product as any).track_qty !== false
       const found = prev.find((l) => l.product.id === product.id && l.locationId === target.location_id)
       if (found) {
         const newQty = found.quantity + qty
-        if (newQty > Number(target.quantity)) {
+        if (trackQty && newQty > Number(target.quantity)) {
           toast.warning(`「${product.name}」在 ${locLabel} 仅 ${target.quantity} 件，已取最大`)
         }
         return prev.map((l) =>
-          l.lineId === found.lineId ? { ...l, quantity: Math.min(newQty, Number(target.quantity)) } : l,
+          l.lineId === found.lineId ? { ...l, quantity: trackQty ? Math.min(newQty, Number(target.quantity)) : newQty } : l,
         )
       }
-      const realQty = Math.min(qty, Number(target.quantity))
-      if (realQty < qty) toast.warning(`「${product.name}」在 ${locLabel} 仅 ${target.quantity} 件，已自动限制`)
+      const realQty = trackQty ? Math.min(qty, Number(target.quantity)) : qty
+      if (trackQty && realQty < qty) toast.warning(`「${product.name}」在 ${locLabel} 仅 ${target.quantity} 件，已自动限制`)
       return [
         ...prev,
         {
@@ -279,6 +294,7 @@ export default function MobileStockOut() {
     ].filter(Boolean).join(' · ')
     const finalTrackingNo = shipMode === 'online' && trackingBound ? trackingNo.trim() || null : null
     const finalIsOffline = shipMode === 'offline'
+    const finalOperatorName = operatorName.trim() || null
 
     setSubmitting(true)
     let successCount = 0
@@ -286,9 +302,14 @@ export default function MobileStockOut() {
     try {
       for (let i = 0; i < lines.length; i++) {
         const l = lines[i]
+        const trackQty = (l.product as any).track_qty !== false
+        if (trackQty && l.quantity > l.locationAvailable) {
+          failReason = `「${l.product.name}」在 ${l.locationLabel} 库存仅剩 ${l.locationAvailable}`
+          return toast.error(failReason)
+        }
         const { error } = await supabase.rpc('stock_out', {
           p_product_id: l.product.id,
-          p_location_id: l.locationId,
+          p_location_id: trackQty ? l.locationId : (l.locationId || null),
           p_quantity: l.quantity,
           p_batch_no: null,
           p_scan_mode: l.scanMode ? 'scan' : 'manual',
@@ -296,6 +317,7 @@ export default function MobileStockOut() {
           p_operator_id: user?.id || null,
           p_tracking_no: finalTrackingNo,
           p_is_offline: finalIsOffline,
+          p_operator_name: finalOperatorName,
         })
         if (error) { failReason = `第${i + 1}项「${l.product.name}」失败：${error.message}`; throw error }
         successCount++
@@ -305,10 +327,18 @@ export default function MobileStockOut() {
       queryClient.invalidateQueries({ queryKey: ['inventory'] })
       queryClient.invalidateQueries({ queryKey: ['product-inventory'] })
       queryClient.invalidateQueries({ queryKey: ['stock-moves'] })
+      // 需求3：提交成功后清空所有状态
       setLines([])
       setActiveProduct(null)
       setActiveLocationId('')
       setActiveQuantity('1')
+      setShipMode('online')
+      setTrackingNo('')
+      setTrackingBound(false)
+      setOfflineNote('')
+      setRemark('')
+      setOperatorName('')
+      setQuickMode(false)
     } catch (err: any) {
       console.error('[批量出库]', err)
       toast.error(failReason || `失败（已成功${successCount}/${lines.length}）`)
@@ -317,7 +347,7 @@ export default function MobileStockOut() {
     }
   }, [
     lines, linesSummary, shipModeValid, shipMode, offlineNote, quickMode, remark,
-    trackingBound, trackingNo, user, queryClient,
+    trackingBound, trackingNo, user, queryClient, operatorName,
   ])
 
   // ============================================================
@@ -493,6 +523,20 @@ export default function MobileStockOut() {
                 </div>
               </div>
             )}
+
+            <div className="space-y-2 pt-2 border-t mt-1">
+              <Label className="text-xs font-medium">出库人 <span className="text-muted-foreground font-normal">（可选，多人共用账号时区分）</span></Label>
+              <Input
+                list="mobile_operator_name_list"
+                value={operatorName}
+                onChange={(e) => setOperatorName(e.target.value)}
+                placeholder="下拉选或手填，例：张三"
+                className="h-10"
+              />
+              <datalist id="mobile_operator_name_list">
+                {operatorListOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+              </datalist>
+            </div>
           </CardContent>
         </Card>
 

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { supabase } from '@/lib/supabase'
+import { supabase, columnsExists } from '@/lib/supabase'
 import { getSettings } from '@/lib/settings'
 
 export interface LowStockItem {
@@ -14,6 +14,8 @@ export interface LowStockItem {
     unit: string
     category: string | null
     is_material_area: boolean
+    track_qty?: boolean
+    manual_status?: 'normal' | 'low_stock' | 'out_of_stock' | null
   }
   location: {
     id: string
@@ -24,27 +26,24 @@ export interface LowStockItem {
       name: string | null
     }
   }
-  // 方案A：补充字段
-  outQty30d?: number       // 过去30天出库总量
-  dailyAvg?: number        // 日均出库量
-  sellableDays?: number    // 能卖天数（库存 / 日均）
-  usesFallback?: boolean   // 是否使用了固定阈值兜底（新品/无出库）
+  outQty30d?: number
+  dailyAvg?: number
+  sellableDays?: number
+  usesFallback?: boolean
+  /** track_qty=false 时，用 manual_status 覆盖等级；这里明确写出真实等级来源 */
+  manualOverrideLevel?: LowStockLevel | null
 }
 
-// 低库存预警等级
 export type LowStockLevel = 'normal' | 'warning' | 'danger' | 'critical' | 'out'
 
-// ============ 固定阈值（兜底用，新品/30天无出库记录时生效） ============
 export const LOW_STOCK_THRESHOLD_WARNING = 30
 export const LOW_STOCK_THRESHOLD_DANGER = 15
 export const LOW_STOCK_THRESHOLD_CRITICAL = 5
 
-// ============ 方案A：能卖天数字面量阈值 ============
-// 能卖天数 ≤3 天红（critical），≤7 天橙（danger），≤15 天黄（warning），>15 天正常
 export const DAYS_THRESHOLD_WARNING = 15
 export const DAYS_THRESHOLD_DANGER = 7
 export const DAYS_THRESHOLD_CRITICAL = 3
-export const OUT_30_DAYS_WINDOW = 30 // 统计过去 30 天出库
+export const OUT_30_DAYS_WINDOW = 30
 
 function getThresholds() {
   const s = getSettings()
@@ -55,14 +54,10 @@ function getThresholds() {
   }
 }
 
-// ============================================================
-// 方案A：核心计算 — 根据 库存数量 + 30天出库量 → 能卖天数 → 预警等级
-// 若无出库（日均=0），回退到固定数量阈值逻辑并标记 usesFallback=true
-// ============================================================
 export interface StockAlertResult {
   level: LowStockLevel
   dailyAvg: number
-  sellableDays: number | null   // null 表示无出库记录，走的固定阈值
+  sellableDays: number | null
   usesFallback: boolean
 }
 
@@ -73,7 +68,6 @@ export function calcStockAlert(quantity: number, outQty30d: number | undefined |
   const out30 = Number(outQty30d) || 0
   const dailyAvg = out30 / OUT_30_DAYS_WINDOW
 
-  // 30天有出库记录 → 按"能卖天数"分级
   if (out30 > 0) {
     const days = quantity / dailyAvg
     let level: LowStockLevel = 'normal'
@@ -83,7 +77,6 @@ export function calcStockAlert(quantity: number, outQty30d: number | undefined |
     return { level, dailyAvg, sellableDays: days, usesFallback: false }
   }
 
-  // 无出库 → 回退固定阈值兜底
   const t = getThresholds()
   let level: LowStockLevel = 'normal'
   if (quantity <= t.critical) level = 'critical'
@@ -92,13 +85,29 @@ export function calcStockAlert(quantity: number, outQty30d: number | undefined |
   return { level, dailyAvg: 0, sellableDays: null, usesFallback: true }
 }
 
-// 兼容老接口：仅传数量，按固定阈值返回等级（不再建议使用，保留以防漏改）
+/** 将 products.manual_status 映射为等级 */
+function mapManualStatus(status: 'normal' | 'low_stock' | 'out_of_stock' | null | undefined): LowStockLevel {
+  switch (status) {
+    case 'out_of_stock': return 'out'
+    case 'low_stock': return 'warning'
+    case 'normal': return 'normal'
+    default: return 'normal'
+  }
+}
+
 export function getLowStockLevel(quantity: number): LowStockLevel {
   return calcStockAlert(quantity, 0).level
 }
 
-// 新版：同时接受 30 天出库量（优先走方案A）
-export function getLowStockLevelV2(quantity: number, outQty30d?: number | null): LowStockLevel {
+export function getLowStockLevelV2(
+  quantity: number,
+  outQty30d?: number | null,
+  opts?: { trackQty?: boolean; manualStatus?: 'normal' | 'low_stock' | 'out_of_stock' | null }
+): LowStockLevel {
+  // 不计数量的产品：如果设置了 manual_status，优先用它
+  if (opts?.trackQty === false && opts?.manualStatus) {
+    return mapManualStatus(opts.manualStatus)
+  }
   return calcStockAlert(quantity, outQty30d).level
 }
 
@@ -147,7 +156,6 @@ export function getLowStockLevelColor(level: LowStockLevel): {
   }
 }
 
-// 能卖天数友好展示（保留1位小数；null 显示"新品/暂无出库"）
 export function formatSellableDays(days: number | null, usesFallback: boolean): string {
   if (days === null || usesFallback) return '暂无销售数据'
   if (!isFinite(days)) return '暂无销售数据'
@@ -155,10 +163,6 @@ export function formatSellableDays(days: number | null, usesFallback: boolean): 
   return days.toFixed(1) + ' 天'
 }
 
-// ============================================================
-// Hook：拉取「每个产品过去30天的出库总量」— 用于方案A计算
-// 结果：Map<productId, outQty30d>
-// ============================================================
 export function useSalesVelocity30d() {
   return useQuery({
     queryKey: ['sales-velocity-30d'],
@@ -184,124 +188,88 @@ export function useSalesVelocity30d() {
 }
 
 // ============================================================
-// 方案A：获取「低库存预警列表」
-// 核心改动：
-// 1. 先拉全部 inventory + unallocated
-// 2. 再拉 sales_velocity_30d（每个产品30天出库量）
-// 3. 用 calcStockAlert() 按"能卖天数"计算等级
-// 4. 保留 level !== 'normal' 的项（按能卖天数升序 + 暂未入仓靠后排序）
+// useLowStock：筛选预警（注意：unallocated_quantity 字段已被 0018 迁移删除，不再读它）
+// 同时支持 track_qty=false 的「不计数量」产品：manual_status=low_stock/out_of_stock 时入预警
 // ============================================================
 export function useLowStock() {
-  // 1) 30天销售速度
   const { data: velocityMap } = useSalesVelocity30d()
 
   return useQuery({
-    queryKey: ['low-stock', velocityMap ? 'v' : 'l'],
+    queryKey: ['low-stock-v2', velocityMap ? 'v' : 'l'],
     queryFn: async () => {
       const vMap = velocityMap || new Map<string, number>()
 
-      // 1. 所有 inventory（含 > 15天阈值的，后面按能卖天数二次筛选）
+      // 🛡 兼容：探测 products 新列，不存在时从 select 里剔除
+      const cols = await columnsExists('products', ['track_qty', 'manual_status'])
+      const prodFields = [
+        'id', 'name', 'sku', 'barcode', 'image_path', 'unit', 'category', 'is_material_area',
+        cols.track_qty ? 'track_qty' : null,
+        cols.manual_status ? 'manual_status' : null,
+      ].filter(Boolean).join(', ')
       const { data: invData, error: invErr } = await supabase
         .from('inventory')
         .select(`
           id,
           quantity,
-          product:products (
-            id, name, sku, barcode, image_path, unit, category,
-            is_material_area
-          ),
-          location:locations (
-            id, code,
-            warehouse:warehouses ( id, code, name )
-          )
+          product:products ( ${prodFields} ),
+          location:locations ( id, code, warehouse:warehouses ( id, code, name ) )
         `)
-        .gt('quantity', 0)
         .order('quantity', { ascending: true })
 
       if (invErr) throw invErr
       const items: LowStockItem[] = []
 
       for (const row of (invData || []) as any[]) {
+        const prod = row.product as LowStockItem['product'] | null
+        if (!prod) continue
+        const trackQty = prod.track_qty !== false
         const qty = Number(row.quantity) || 0
-        if (qty <= 0) continue
-        const pid = row.product?.id as string
-        const out30 = vMap.get(pid) || 0
+        const out30 = vMap.get(prod.id) || 0
+
+        let level: LowStockLevel
+        if (!trackQty && prod.manual_status) {
+          // 不计数量 + 手动状态 → 用手动状态覆盖
+          level = mapManualStatus(prod.manual_status)
+        } else {
+          // 正常产品：数量为 0 也纳入"缺货"预警（此前只选 >0 的，会漏掉缺库存的）
+          level = calcStockAlert(qty, out30).level
+        }
+        if (level === 'normal') continue
         const alert = calcStockAlert(qty, out30)
-        if (alert.level === 'normal') continue // 正常的不进预警列表
         items.push({
-          ...(row as LowStockItem),
-          outQty30d: out30,
-          dailyAvg: alert.dailyAvg,
-          sellableDays: alert.sellableDays ?? undefined,
-          usesFallback: alert.usesFallback,
-        })
-      }
-
-      // 2. products.unallocated_quantity 命中预警的产品
-      const { data: prodData, error: prodErr } = await supabase
-        .from('products')
-        .select('id, name, sku, barcode, image_path, unit, category, is_material_area, unallocated_quantity')
-        .gt('unallocated_quantity', 0)
-
-      if (prodErr) throw prodErr
-
-      for (const p of (prodData || []) as any[]) {
-        const qty = Number(p.unallocated_quantity) || 0
-        if (qty <= 0) continue
-        const out30 = vMap.get(p.id) || 0
-        const alert = calcStockAlert(qty, out30)
-        if (alert.level === 'normal') continue
-        items.push({
-          id: `unalloc-${p.id}`,
+          id: String(row.id),
           quantity: qty,
-          product: {
-            id: p.id,
-            name: p.name,
-            sku: p.sku,
-            barcode: p.barcode,
-            image_path: p.image_path,
-            unit: p.unit,
-            category: p.category,
-            is_material_area: !!p.is_material_area,
-          },
-          location: {
-            id: 'unalloc',
-            code: '暂未入仓',
-            warehouse: {
-              id: 'unalloc',
-              code: '',
-              name: null,
-            },
-          },
+          product: prod,
+          location: row.location as LowStockItem['location'],
           outQty30d: out30,
           dailyAvg: alert.dailyAvg,
           sellableDays: alert.sellableDays ?? undefined,
           usesFallback: alert.usesFallback,
+          manualOverrideLevel: !trackQty && prod.manual_status ? level : null,
         })
       }
 
-      // 排序：
-      // 1) 能卖天数升序（能卖越少越靠前；回退固定阈值的按数量升序）
-      // 2) 暂未入仓放后面
       items.sort((a, b) => {
+        // 先按等级严重性：out > critical > danger > warning
+        const lv = (l: LowStockLevel) =>
+          l === 'out' ? 0 : l === 'critical' ? 1 : l === 'danger' ? 2 : l === 'warning' ? 3 : 4
+        const aLvl = a.manualOverrideLevel ?? calcStockAlert(a.quantity, a.outQty30d ?? 0).level
+        const bLvl = b.manualOverrideLevel ?? calcStockAlert(b.quantity, b.outQty30d ?? 0).level
+        const lvd = lv(aLvl) - lv(bLvl)
+        if (lvd !== 0) return lvd
         const aFallback = !!a.usesFallback || a.sellableDays == null
         const bFallback = !!b.usesFallback || b.sellableDays == null
-        // 两者都有天数 → 按天数
         if (!aFallback && !bFallback) {
           const diff = (a.sellableDays as number) - (b.sellableDays as number)
           if (diff !== 0) return diff
         } else if (aFallback && !bFallback) {
-          return 1 // 回退位靠后
+          return 1
         } else if (!aFallback && bFallback) {
           return -1
         } else {
-          // 都回退 → 按数量升序
           if (a.quantity !== b.quantity) return a.quantity - b.quantity
         }
-        // 同等级下暂未入仓放后面
-        const aIs = a.location.id === 'unalloc' ? 1 : 0
-        const bIs = b.location.id === 'unalloc' ? 1 : 0
-        return aIs - bIs
+        return 0
       })
 
       return items
@@ -310,55 +278,61 @@ export function useLowStock() {
   })
 }
 
-// 分级统计（低库存详情页顶部卡片用）
 export function useLowStockCount() {
   const { data } = useLowStock()
   return {
     total: data?.length || 0,
-    warning: data?.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d) === 'warning').length || 0,
-    danger: data?.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d) === 'danger').length || 0,
-    critical: data?.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d) === 'critical').length || 0,
+    warning: data?.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d, {
+      trackQty: i.product.track_qty !== false,
+      manualStatus: i.product.manual_status ?? null,
+    }) === 'warning').length || 0,
+    danger: data?.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d, {
+      trackQty: i.product.track_qty !== false,
+      manualStatus: i.product.manual_status ?? null,
+    }) === 'danger').length || 0,
+    critical: data?.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d, {
+      trackQty: i.product.track_qty !== false,
+      manualStatus: i.product.manual_status ?? null,
+    }) === 'critical').length || 0,
+    out: data?.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d, {
+      trackQty: i.product.track_qty !== false,
+      manualStatus: i.product.manual_status ?? null,
+    }) === 'out').length || 0,
   }
 }
 
-// 轻量版：仅统计预警总数（首页导航徽标用）
 export function useLowStockCountLight() {
   const { data: velocityMap } = useSalesVelocity30d()
   return useQuery({
-    queryKey: ['low-stock-count-light', velocityMap ? 'v' : 'l'],
+    queryKey: ['low-stock-count-light-v2', velocityMap ? 'v' : 'l'],
     queryFn: async () => {
       const vMap = velocityMap || new Map<string, number>()
-      const t = getThresholds()
-
-      // 1. inventory 全部 > 0
-      const { data: invRows, error: invErr } = await supabase
+      // 🛡 兼容：列不存在时不 select
+      const cols = await columnsExists('products', ['track_qty', 'manual_status'])
+      const prodFields = [
+        cols.track_qty ? 'track_qty' : null,
+        cols.manual_status ? 'manual_status' : null,
+      ].filter(Boolean)
+      const selectPart = prodFields.length > 0
+        ? `product_id, quantity, product:products ( ${prodFields.join(', ')} )`
+        : 'product_id, quantity'
+      const { data: rows, error } = await supabase
         .from('inventory')
-        .select('product_id, quantity')
-        .gt('quantity', 0)
-      if (invErr) throw invErr
-
+        .select(selectPart)
+      if (error) throw error
       let total = 0
-      for (const row of (invRows || []) as any[]) {
-        const qty = Number(row.quantity) || 0
-        const out30 = vMap.get(row.product_id as string) || 0
+      for (const r of (rows || []) as any[]) {
+        const prod = r.product || {}
+        const trackQty = prod.track_qty !== false
+        if (!trackQty && prod.manual_status) {
+          const l = mapManualStatus(prod.manual_status)
+          if (l !== 'normal') { total++; continue }
+        }
+        const qty = Number(r.quantity) || 0
+        const out30 = vMap.get(r.product_id as string) || 0
         const alert = calcStockAlert(qty, out30)
         if (alert.level !== 'normal') total++
       }
-
-      // 2. unallocated
-      const { data: prodRows, error: prodErr } = await supabase
-        .from('products')
-        .select('id, unallocated_quantity')
-        .gt('unallocated_quantity', 0)
-      if (prodErr) throw prodErr
-      for (const row of (prodRows || []) as any[]) {
-        const qty = Number(row.unallocated_quantity) || 0
-        const out30 = vMap.get(row.id as string) || 0
-        const alert = calcStockAlert(qty, out30)
-        if (alert.level !== 'normal') total++
-      }
-
-      void t // 保留 t 读取以防将来需要自定义固定阈值
       return total
     },
     enabled: !!velocityMap,
