@@ -221,10 +221,18 @@ export default function MobileStockOut() {
   // ============================================================
   // 扫产品码 → 加入清单
   // ============================================================
+  // 扫产品码；扫不到 → 兜底视为快递单号自动绑定（不用先切模式/选框）
   const findProductByBarcode = useCallback(async (barcode: string) => {
     try {
       const p = await resolveProductByCode(barcode)
-      if (!p) { toast.warning(`未找到「${barcode.trim()}」`); return }
+      if (!p) {
+        const code = barcode.trim()
+        setTrackingNo(code)
+        setTrackingBound(true)
+        setShipMode('online')
+        toast.success(`📦 已填入单号：${code}`)
+        return
+      }
       setActiveProduct(p)
       setActiveQuantity('1')
       await addProductToLines(p, { scanMode: true, preferFirstLocation: true })

@@ -245,13 +245,18 @@ export default function StockOutPage() {
     toast.success(`已加入清单：${product.name} × ${qty}（${locLabel}）`, { duration: 1800 })
   }, [inventoryList, activeProduct?.id, activeLocationId])
 
-  // 通过条形码查找产品 → 加入清单
+  // 通过条形码查找产品 → 加入清单；若完全匹配不到产品/库位 → 兜底填快递单号（扫单号不用先点输入框）
   const findProductByBarcode = useCallback(async (barcode: string) => {
     setSearchingBarcode(true)
     try {
       const p = await resolveProductByCode(barcode)
       if (!p) {
-        toast.warning(`未找到「${barcode.trim()}」对应产品`)
+        // 兜底：扫不到产品 → 视为快递单号，自动绑定
+        const code = barcode.trim()
+        setTrackingNo(code)
+        setTrackingBound(true)
+        setShipMode('online')
+        toast.success(`📦 已填入单号：${code}`)
         return
       }
       setActiveProduct(p)

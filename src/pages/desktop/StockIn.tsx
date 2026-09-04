@@ -195,6 +195,9 @@ export default function StockInPage() {
         p_scan_mode: scanMode ? 'scan' : 'manual',
         p_remark: remark || null,
         p_operator_id: user?.id || null,
+        p_tracking_no: null,
+        p_is_offline: false,
+        p_operator_name: null,
       })
       if (error) throw error
     },

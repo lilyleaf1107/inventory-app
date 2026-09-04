@@ -599,6 +599,12 @@ export default function ProductsPage() {
         p_location_id: locId,
         p_quantity: quantity,
         p_scan_mode: 'manual',
+        p_batch_no: null,
+        p_remark: null,
+        p_operator_id: null,
+        p_tracking_no: null,
+        p_is_offline: false,
+        p_operator_name: null,
       })
       if (rpcErr) throw rpcErr
       // 回查写入的 inventory 行（按 product_id + locationId 或默认库位）
@@ -793,6 +799,12 @@ export default function ProductsPage() {
               p_location_id: locationId || null,
               p_quantity: qty,
               p_scan_mode: 'manual',
+              p_batch_no: null,
+              p_remark: null,
+              p_operator_id: null,
+              p_tracking_no: null,
+              p_is_offline: false,
+              p_operator_name: null,
             })
             if (stockErr) throw stockErr
           }

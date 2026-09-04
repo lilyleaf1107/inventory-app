@@ -539,7 +539,12 @@ export default function WarehousesPage() {
         p_location_id: locId,
         p_quantity: qty,
         p_scan_mode: 'manual',
+        p_batch_no: null,
         p_remark: '从仓库管理添加',
+        p_operator_id: null,
+        p_tracking_no: null,
+        p_is_offline: false,
+        p_operator_name: null,
       })
       if (error) throw error
       return { productId, locId, qty }
@@ -571,7 +576,13 @@ export default function WarehousesPage() {
         p_product_id: vars.productId,
         p_location_id: vars.fromLocId,
         p_quantity: vars.qty,
+        p_scan_mode: 'manual',
+        p_batch_no: null,
         p_remark: `调拨至 ${vars.toLocCode}`,
+        p_operator_id: null,
+        p_tracking_no: null,
+        p_is_offline: false,
+        p_operator_name: null,
       })
       if (outErr) {
         const e: any = new Error(outErr.message)
@@ -582,7 +593,13 @@ export default function WarehousesPage() {
         p_product_id: vars.productId,
         p_location_id: vars.toLocId,
         p_quantity: vars.qty,
+        p_scan_mode: 'manual',
+        p_batch_no: null,
         p_remark: `调拨自 ${vars.fromLocCode}`,
+        p_operator_id: null,
+        p_tracking_no: null,
+        p_is_offline: false,
+        p_operator_name: null,
       })
       if (inErr) {
         const e: any = new Error(inErr.message)
