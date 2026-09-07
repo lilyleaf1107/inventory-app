@@ -298,11 +298,7 @@ export default function StockOutPage() {
 
   useBarcodeGun({
     onScan: (code) => {
-      // 如果单号输入框有焦点，就让扫码枪先填单号（回车绑定），否则按产品条码处理
-      if (
-        document.activeElement &&
-        (document.activeElement as HTMLElement).id === 'tracking_no'
-      ) return
+      // 扫码内容先匹配产品，匹配不到则自动作为快递单号填入
       quickStockOut(code)
     },
     enabled: !isMobile,
@@ -317,7 +313,8 @@ export default function StockOutPage() {
         .map((l) => {
           if (l.lineId !== lineId) return l
           const v = Math.max(1, Math.floor(newQty || 1))
-          if (v > l.locationAvailable) {
+          const trackQty = (l.product as any).track_qty !== false
+          if (trackQty && v > l.locationAvailable) {
             toast.warning(`「${l.product.name}」超出库位可用 ${l.locationAvailable}`)
             return { ...l, quantity: l.locationAvailable }
           }
@@ -364,7 +361,8 @@ export default function StockOutPage() {
     }
     // 再次按库位校验数量
     for (const l of lines) {
-      if (l.quantity > l.locationAvailable) {
+      const trackQty = (l.product as any).track_qty !== false
+      if (trackQty && l.quantity > l.locationAvailable) {
         toast.error(`「${l.product.name}」在 ${l.locationLabel} 库存仅剩 ${l.locationAvailable}`)
         return
       }
@@ -420,7 +418,7 @@ export default function StockOutPage() {
       queryClient.invalidateQueries({ queryKey: ['product-inventory'] })
       queryClient.invalidateQueries({ queryKey: ['stock-moves'] })
 
-      // 需求3：整单提交成功后，清空【单号、清单、出库方式、出库人、备注、线下备注】所有状态
+      // 需求3：整单提交成功后，清空【单号、清单、出库方式、备注、线下备注】，保留出库人
       setLines([])
       setActiveProduct(null)
       setActiveLocationId('')
@@ -432,7 +430,6 @@ export default function StockOutPage() {
       setTrackingBound(false)
       setOfflineNote('')
       setRemark('')
-      setOperatorName('')
     } catch (err: any) {
       console.error('[批量出库] 失败', err)
       toast.error(
@@ -469,7 +466,8 @@ export default function StockOutPage() {
       toast.warning('请选择有效库位')
       return
     }
-    if (qty > Number(inv.quantity)) {
+    const trackQty = (activeProduct as any).track_qty !== false
+    if (trackQty && qty > Number(inv.quantity)) {
       toast.error(`库存不足，该库位仅有 ${inv.quantity} ${activeProduct.unit}`)
       return
     }
@@ -493,7 +491,8 @@ export default function StockOutPage() {
   }
 
   const activeQtyNum = parseInt(activeQuantity, 10) || 0
-  const isOverStockActive = activeLocationId && activeQtyNum > activeLocationQty
+  const activeTrackQty = (activeProduct as any)?.track_qty !== false
+  const isOverStockActive = activeTrackQty && !!activeLocationId && activeQtyNum > activeLocationQty
 
   // ============================================================
   // 渲染
@@ -850,10 +849,18 @@ export default function StockOutPage() {
                         <Input
                           type="number"
                           min="1"
+                          step="1"
                           value={activeQuantity}
                           onChange={(e) => {
                             const n = parseInt(e.target.value, 10)
                             setActiveQuantity(isNaN(n) || n < 1 ? '' : String(n))
+                          }}
+                          onWheel={(e) => {
+                            e.preventDefault()
+                            const dir = (e as unknown as WheelEvent).deltaY
+                            const cur = parseInt((e.target as HTMLInputElement).value, 10) || 1
+                            const next = dir < 0 ? cur + 1 : Math.max(1, cur - 1)
+                            setActiveQuantity(String(next))
                           }}
                           className={isOverStockActive ? 'border-red-500' : 'h-11'}
                           placeholder="数量"
@@ -996,14 +1003,22 @@ export default function StockOutPage() {
                           </button>
                           <Input
                             type="number"
+                            step="1"
                             value={l.quantity}
                             onChange={(e) => updateLineQty(l.lineId, parseInt(e.target.value, 10))}
+                            onWheel={(e) => {
+                              e.preventDefault()
+                              const dir = (e as unknown as WheelEvent).deltaY
+                              const cur = parseInt((e.target as HTMLInputElement).value, 10) || 1
+                              const next = dir < 0 ? cur + 1 : Math.max(1, cur - 1)
+                              updateLineQty(l.lineId, next)
+                            }}
                             className="h-7 w-16 border-none text-center shadow-none p-0 text-sm font-bold"
                           />
                           <button
                             type="button"
                             onClick={() => updateLineQty(l.lineId, l.quantity + 1)}
-                            disabled={l.quantity >= l.locationAvailable}
+                            disabled={(l.product as any).track_qty !== false && l.quantity >= l.locationAvailable}
                             className="h-7 w-7 rounded-md hover:bg-orange-100 disabled:opacity-40 text-orange-700 font-bold"
                           >
                             <Plus className="h-3 w-3 mx-auto" />

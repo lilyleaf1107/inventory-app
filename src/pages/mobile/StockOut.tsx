@@ -172,7 +172,6 @@ export default function MobileStockOut() {
         .from('inventory')
         .select(`*, location:locations ( id, code, warehouse:warehouses (id, name, code) )`)
         .eq('product_id', product.id)
-        .gt('quantity', 0)
         .order('updated_at', { ascending: false })
       if (error) throw error
       invList = data as any[]
@@ -262,7 +261,8 @@ export default function MobileStockOut() {
       prev.map((l) => {
         if (l.lineId !== lineId) return l
         const v = Math.max(1, Math.floor(newQty || 1))
-        if (v > l.locationAvailable) {
+        const trackQty = (l.product as any).track_qty !== false
+        if (trackQty && v > l.locationAvailable) {
           toast.warning(`「${l.product.name}」库位仅 ${l.locationAvailable}`)
           return { ...l, quantity: l.locationAvailable }
         }
@@ -290,7 +290,8 @@ export default function MobileStockOut() {
     if (lines.length === 0) { toast.warning('清单为空'); return }
     if (!shipModeValid) { toast.warning('单号校验失败'); return }
     for (const l of lines) {
-      if (l.quantity > l.locationAvailable) {
+      const trackQty = (l.product as any).track_qty !== false
+      if (trackQty && l.quantity > l.locationAvailable) {
         toast.error(`「${l.product.name}」在 ${l.locationLabel} 库存仅剩 ${l.locationAvailable}`)
         return
       }
@@ -335,7 +336,7 @@ export default function MobileStockOut() {
       queryClient.invalidateQueries({ queryKey: ['inventory'] })
       queryClient.invalidateQueries({ queryKey: ['product-inventory'] })
       queryClient.invalidateQueries({ queryKey: ['stock-moves'] })
-      // 需求3：提交成功后清空所有状态
+      // 需求3：提交成功后清空状态，保留出库人
       setLines([])
       setActiveProduct(null)
       setActiveLocationId('')
@@ -345,7 +346,6 @@ export default function MobileStockOut() {
       setTrackingBound(false)
       setOfflineNote('')
       setRemark('')
-      setOperatorName('')
       setQuickMode(false)
     } catch (err: any) {
       console.error('[批量出库]', err)
@@ -368,7 +368,8 @@ export default function MobileStockOut() {
     if (!qty || qty <= 0) return toast.warning('数量必须>0')
     const inv = inventoryList?.find((i) => i.location_id === activeLocationId)
     if (!inv) return toast.warning('库位无效')
-    if (qty > Number(inv.quantity)) return toast.error(`库存仅 ${inv.quantity}`)
+    const trackQty = (activeProduct as any).track_qty !== false
+    if (trackQty && qty > Number(inv.quantity)) return toast.error(`库存仅 ${inv.quantity}`)
     await addProductToLines(activeProduct, { qty, scanMode: false, preferFirstLocation: false, locationId: activeLocationId })
     setActiveProduct(null)
     setActiveLocationId('')
@@ -383,7 +384,8 @@ export default function MobileStockOut() {
   }
 
   const activeQtyNum = parseInt(activeQuantity, 10) || 0
-  const isOverActive = activeLocationId && activeQtyNum > activeLocationQty
+  const activeTrackQty = (activeProduct as any)?.track_qty !== false
+  const isOverActive = activeTrackQty && !!activeLocationId && activeQtyNum > activeLocationQty
 
   return (
     <div className="flex flex-col h-full">
@@ -664,17 +666,25 @@ export default function MobileStockOut() {
                       ><Minus className="h-3 w-3 mx-auto" /></button>
                       <Input
                         type="number"
+                        step="1"
                         value={activeQuantity}
                         onChange={(e) => {
                           const n = parseInt(e.target.value, 10)
                           setActiveQuantity(isNaN(n) || n < 1 ? '' : String(n))
+                        }}
+                        onWheel={(e) => {
+                          e.preventDefault()
+                          const dir = (e as unknown as WheelEvent).deltaY
+                          const cur = parseInt((e.target as HTMLInputElement).value, 10) || 1
+                          const next = dir < 0 ? cur + 1 : Math.max(1, cur - 1)
+                          setActiveQuantity(String(next))
                         }}
                         className={`h-8 border-none shadow-none p-0 text-center text-sm font-bold ${isOverActive ? '!text-red-600' : ''}`}
                       />
                       <button
                         type="button"
                         onClick={() => setActiveQuantity(String(activeQtyNum + 1))}
-                        disabled={!!activeLocationId && activeQtyNum >= activeLocationQty}
+                        disabled={activeTrackQty && !!activeLocationId && activeQtyNum >= activeLocationQty}
                         className="h-8 w-8 rounded-md hover:bg-orange-100 disabled:opacity-40 text-orange-700 font-bold"
                       ><Plus className="h-3 w-3 mx-auto" /></button>
                     </div>
@@ -763,14 +773,22 @@ export default function MobileStockOut() {
                         ><Minus className="h-3 w-3 mx-auto" /></button>
                         <Input
                           type="number"
+                          step="1"
                           value={l.quantity}
                           onChange={(e) => updateLineQty(l.lineId, parseInt(e.target.value, 10))}
+                          onWheel={(e) => {
+                            e.preventDefault()
+                            const dir = (e as unknown as WheelEvent).deltaY
+                            const cur = parseInt((e.target as HTMLInputElement).value, 10) || 1
+                            const next = dir < 0 ? cur + 1 : Math.max(1, cur - 1)
+                            updateLineQty(l.lineId, next)
+                          }}
                           className="h-7 w-14 border-none shadow-none p-0 text-center text-sm font-bold"
                         />
                         <button
                           type="button"
                           onClick={() => updateLineQty(l.lineId, l.quantity + 1)}
-                          disabled={l.quantity >= l.locationAvailable}
+                          disabled={(l.product as any).track_qty !== false && l.quantity >= l.locationAvailable}
                           className="h-7 w-7 rounded-md hover:bg-orange-100 disabled:opacity-40 text-orange-700"
                         ><Plus className="h-3 w-3 mx-auto" /></button>
                       </div>
