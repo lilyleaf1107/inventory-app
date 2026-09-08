@@ -298,8 +298,15 @@ export default function StockOutPage() {
 
   useBarcodeGun({
     onScan: (code) => {
-      // 扫码内容先匹配产品，匹配不到则自动作为快递单号填入
-      quickStockOut(code)
+      // 产品码固定4位，其余一律视为快递单号直接填入
+      if (code.length === 4) {
+        quickStockOut(code)
+      } else {
+        setTrackingNo(code)
+        setTrackingBound(true)
+        setShipMode('online')
+        toast.success(`📦 已填入单号：${code}`)
+      }
     },
     enabled: !isMobile,
   })

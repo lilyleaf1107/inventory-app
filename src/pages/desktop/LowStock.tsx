@@ -24,15 +24,25 @@ const PAGE_SIZE = 20
 export default function LowStockPage() {
   const { data: lowStockItems, isLoading } = useLowStock()
   const [page, setPage] = useState(1)
+  const [activeLevel, setActiveLevel] = useState<'warning' | 'danger' | 'critical' | null>(null)
 
-  const total = lowStockItems?.length || 0
+  const filteredList = useMemo(() => {
+    if (!lowStockItems) return []
+    if (!activeLevel) return lowStockItems
+    return lowStockItems.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d, {
+      trackQty: i.product.track_qty !== false,
+      manualStatus: i.product.manual_status ?? null,
+    }) === activeLevel)
+  }, [lowStockItems, activeLevel])
+
+  const total = filteredList.length
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   // 筛选/数据变化时，重置回第 1 页
-  useMemo(() => { setPage(1) }, [total])
+  useMemo(() => { setPage(1) }, [total, activeLevel])
 
   const pagedList = useMemo(
-    () => (lowStockItems || []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
-    [lowStockItems, page],
+    () => filteredList.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [filteredList, page],
   )
 
   const stats = useMemo(() => {
@@ -68,7 +78,10 @@ export default function LowStockPage() {
 
       {/* 统计卡片 */}
       <div className="grid gap-4 md:grid-cols-4">
-        <Card className="border-orange-200">
+        <Card
+          className={`border-orange-200 cursor-pointer transition-all hover:shadow-md ${activeLevel === null ? 'ring-2 ring-orange-400' : ''}`}
+          onClick={() => setActiveLevel(null)}
+        >
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
               <Package className="h-4 w-4" />
@@ -79,7 +92,10 @@ export default function LowStockPage() {
             <div className="text-2xl font-bold text-orange-600">{stats.total}</div>
           </CardContent>
         </Card>
-        <Card className="border-yellow-200">
+        <Card
+          className={`border-yellow-200 cursor-pointer transition-all hover:shadow-md ${activeLevel === 'warning' ? 'ring-2 ring-yellow-400' : ''}`}
+          onClick={() => setActiveLevel(activeLevel === 'warning' ? null : 'warning')}
+        >
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
               🟡 黄色预警（≤{DAYS_THRESHOLD_WARNING} 天）
@@ -89,7 +105,10 @@ export default function LowStockPage() {
             <div className="text-2xl font-bold text-yellow-600">{stats.warning}</div>
           </CardContent>
         </Card>
-        <Card className="border-orange-200">
+        <Card
+          className={`border-orange-200 cursor-pointer transition-all hover:shadow-md ${activeLevel === 'danger' ? 'ring-2 ring-orange-400' : ''}`}
+          onClick={() => setActiveLevel(activeLevel === 'danger' ? null : 'danger')}
+        >
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
               🟠 橙色预警（≤{DAYS_THRESHOLD_DANGER} 天）
@@ -99,7 +118,10 @@ export default function LowStockPage() {
             <div className="text-2xl font-bold text-orange-600">{stats.danger}</div>
           </CardContent>
         </Card>
-        <Card className="border-red-200">
+        <Card
+          className={`border-red-200 cursor-pointer transition-all hover:shadow-md ${activeLevel === 'critical' ? 'ring-2 ring-red-400' : ''}`}
+          onClick={() => setActiveLevel(activeLevel === 'critical' ? null : 'critical')}
+        >
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
               🔴 红色预警（≤{DAYS_THRESHOLD_CRITICAL} 天）
@@ -133,7 +155,7 @@ export default function LowStockPage() {
                   加载中...
                 </TableCell>
               </TableRow>
-            ) : (lowStockItems ?? []).length === 0 ? (
+            ) : filteredList.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                   🎉 暂无库存预警商品

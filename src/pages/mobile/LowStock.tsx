@@ -20,14 +20,24 @@ export default function MobileLowStock() {
   const navigate = useNavigate()
   const { data: lowStockItems, isLoading } = useLowStock()
   const [page, setPage] = useState(1)
+  const [activeLevel, setActiveLevel] = useState<'warning' | 'danger' | 'critical' | null>(null)
 
-  const total = lowStockItems?.length || 0
+  const filteredList = useMemo(() => {
+    if (!lowStockItems) return []
+    if (!activeLevel) return lowStockItems
+    return lowStockItems.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d, {
+      trackQty: i.product.track_qty !== false,
+      manualStatus: i.product.manual_status ?? null,
+    }) === activeLevel)
+  }, [lowStockItems, activeLevel])
+
+  const total = filteredList.length
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
-  useMemo(() => { setPage(1) }, [total]) // 数据变→回第 1 页
+  useMemo(() => { setPage(1) }, [total, activeLevel]) // 数据/筛选变→回第 1 页
 
   const pagedList = useMemo(
-    () => (lowStockItems || []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
-    [lowStockItems, page],
+    () => filteredList.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [filteredList, page],
   )
 
   const stats = {
@@ -64,19 +74,31 @@ export default function MobileLowStock() {
 
         {/* 统计卡片 */}
         <div className="p-3 grid grid-cols-4 gap-2">
-          <Card className="border-orange-200"><CardContent className="p-2 text-center">
+          <Card
+            className={`border-orange-200 cursor-pointer transition-all ${activeLevel === null ? 'ring-2 ring-orange-400' : ''}`}
+            onClick={() => setActiveLevel(null)}
+          ><CardContent className="p-2 text-center">
             <div className="text-lg font-bold text-orange-600">{stats.total}</div>
             <div className="text-[10px] text-muted-foreground">总数</div>
           </CardContent></Card>
-          <Card className="border-yellow-200"><CardContent className="p-2 text-center">
+          <Card
+            className={`border-yellow-200 cursor-pointer transition-all ${activeLevel === 'warning' ? 'ring-2 ring-yellow-400' : ''}`}
+            onClick={() => setActiveLevel(activeLevel === 'warning' ? null : 'warning')}
+          ><CardContent className="p-2 text-center">
             <div className="text-lg font-bold text-yellow-600">{stats.warning}</div>
             <div className="text-[10px] text-muted-foreground">黄(≤15天)</div>
           </CardContent></Card>
-          <Card className="border-orange-200"><CardContent className="p-2 text-center">
+          <Card
+            className={`border-orange-200 cursor-pointer transition-all ${activeLevel === 'danger' ? 'ring-2 ring-orange-400' : ''}`}
+            onClick={() => setActiveLevel(activeLevel === 'danger' ? null : 'danger')}
+          ><CardContent className="p-2 text-center">
             <div className="text-lg font-bold text-orange-600">{stats.danger}</div>
             <div className="text-[10px] text-muted-foreground">橙(≤7天)</div>
           </CardContent></Card>
-          <Card className="border-red-200"><CardContent className="p-2 text-center">
+          <Card
+            className={`border-red-200 cursor-pointer transition-all ${activeLevel === 'critical' ? 'ring-2 ring-red-400' : ''}`}
+            onClick={() => setActiveLevel(activeLevel === 'critical' ? null : 'critical')}
+          ><CardContent className="p-2 text-center">
             <div className="text-lg font-bold text-red-600">{stats.critical}</div>
             <div className="text-[10px] text-muted-foreground">红(≤3天)</div>
           </CardContent></Card>
@@ -86,7 +108,7 @@ export default function MobileLowStock() {
         <div className="px-3 pb-3 space-y-2">
           {isLoading ? (
             <div className="text-center py-12 text-muted-foreground text-sm">加载中...</div>
-          ) : (lowStockItems ?? []).length === 0 ? (
+          ) : filteredList.length === 0 ? (
             <div className="text-center py-16">
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-50 mx-auto mb-3">
                 <Package className="h-8 w-8 text-green-500" />
