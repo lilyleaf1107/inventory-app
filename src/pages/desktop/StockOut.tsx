@@ -67,6 +67,7 @@ export default function StockOutPage() {
   const [offlineNote, setOfflineNote] = useState('')
   const [remark, setRemark] = useState('')
   const trackingInputRef = useRef<HTMLInputElement>(null)
+  const bindTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ========== 出库人（同一账号可能对应多出库人） ==========
   const [operatorName, setOperatorName] = useState('')
@@ -84,6 +85,14 @@ export default function StockOutPage() {
     if (operatorName && !base.includes(operatorName)) base.unshift(operatorName)
     return Array.from(new Set(base)).filter(Boolean)
   }, [profileList, operatorName])
+
+  // 在线模式且未绑定时，自动聚焦单号输入框，确保扫码枪内容直接进框
+  useEffect(() => {
+    if (shipMode === 'online' && !trackingBound) {
+      const t = setTimeout(() => trackingInputRef.current?.focus(), 50)
+      return () => clearTimeout(t)
+    }
+  }, [shipMode, trackingBound])
 
   // ========== 产品清单（多产品） ==========
   const [lines, setLines] = useState<OutboundLineItem[]>([])
@@ -298,6 +307,11 @@ export default function StockOutPage() {
 
   useBarcodeGun({
     onScan: (code) => {
+      // 单号输入框聚焦时，由输入框自身的 onChange/onKeyDown 处理，避免重复
+      if (
+        document.activeElement &&
+        (document.activeElement as HTMLElement).id === 'tracking_no'
+      ) return
       // 产品码固定4位，其余一律视为快递单号直接填入
       if (code.length === 4) {
         quickStockOut(code)
@@ -590,21 +604,50 @@ export default function StockOutPage() {
                   ref={trackingInputRef}
                   value={trackingNo}
                   onChange={(e) => {
-                    setTrackingNo(e.target.value)
+                    const val = e.target.value
+                    setTrackingNo(val)
                     setTrackingBound(false)
+                    // 防抖：扫码枪输入快，停止 300ms 后自动绑定
+                    if (bindTimerRef.current) clearTimeout(bindTimerRef.current)
+                    bindTimerRef.current = setTimeout(() => {
+                      const v = val.trim()
+                      if (!v) return
+                      if (v.length === 4) {
+                        quickStockOut(v)
+                        setTrackingNo('')
+                        setTrackingBound(false)
+                      } else {
+                        setTrackingNo(v)
+                        setTrackingBound(true)
+                        trackingInputRef.current?.blur()
+                        document.body.focus()
+                        toast.success(`✅ 已绑定单号：${v}`)
+                      }
+                    }, 300)
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault()
-                      if (trackingNo.trim()) {
+                      if (bindTimerRef.current) clearTimeout(bindTimerRef.current)
+                      const val = e.currentTarget.value.trim()
+                      if (!val) {
+                        toast.warning('请输入单号')
+                        return
+                      }
+                      if (val.length === 4) {
+                        quickStockOut(val)
+                        setTrackingNo('')
+                        setTrackingBound(false)
+                      } else {
+                        setTrackingNo(val)
                         setTrackingBound(true)
                         trackingInputRef.current?.blur()
                         document.body.focus()
-                        toast.success(`✅ 已绑定单号：${trackingNo.trim()}`)
-                      } else toast.warning('请输入单号')
+                        toast.success(`✅ 已绑定单号：${val}`)
+                      }
                     }
                   }}
-                  placeholder="例如：SF1234567890，输完按回车或点绑定"
+                  placeholder="例如：SF1234567890，输完自动绑定"
                   className={`h-11 ${trackingBound ? 'border-green-500 bg-green-50 focus:border-green-500' : ''}`}
                 />
                 {trackingBound ? (
