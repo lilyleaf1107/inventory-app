@@ -16,6 +16,7 @@ import {
   X,
   FileText,
   Layers,
+  RefreshCcw,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
@@ -93,7 +94,7 @@ export default function MobileMoves() {
   const [savingEdit, setSavingEdit] = useState(false)
 
   const { data: moves, isLoading, error, refetch } = useQuery({
-    queryKey: ['m-stock-moves-v2', typeFilter, shipModeFilter, trackingSearch],
+    queryKey: ['stock-moves-v2', typeFilter, shipModeFilter, trackingSearch],
     queryFn: async () => {
       // 稳定字段直接查：tracking_no / is_offline / operator_name
       let qb = supabase
@@ -106,7 +107,7 @@ export default function MobileMoves() {
           operator:profiles!stock_moves_operator_id_fkey(id, name)
         `)
         .order('created_at', { ascending: false })
-        .limit(300) as any
+        .limit(500) as any
       if (typeFilter !== 'all') qb = qb.eq('move_type', typeFilter)
       const { data, error: err } = await qb
       if (err) throw err
@@ -131,6 +132,7 @@ export default function MobileMoves() {
         return true
       })
     },
+    staleTime: 1000 * 60 * 5,
   })
 
   // 分组逻辑
@@ -268,8 +270,16 @@ export default function MobileMoves() {
 
       {/* ================ 🆕 顶部 5 张汇总卡（一眼看全） ================ */}
       <div className="rounded-2xl bg-gradient-to-br from-slate-50 via-white to-indigo-50/40 p-3 border border-slate-200 shadow-sm space-y-3">
-        <div className="flex items-center gap-1.5 text-[11px] font-medium text-indigo-600">
-          <Layers className="h-3 w-3" /> 当前筛选 · 一眼全局
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 text-[11px] font-medium text-indigo-600">
+            <Layers className="h-3 w-3" /> 当前筛选 · 一眼全局
+          </div>
+          <button
+            onClick={() => refetch()}
+            className="flex items-center gap-1 text-[11px] font-medium text-slate-500 hover:text-indigo-600 transition-colors"
+          >
+            <RefreshCcw className="h-3 w-3" /> 刷新
+          </button>
         </div>
         <div className="grid grid-cols-5 gap-1.5">
           <div className="rounded-xl bg-white border border-slate-100 shadow-inner p-2 flex flex-col items-center justify-center">
@@ -692,7 +702,6 @@ export default function MobileMoves() {
               if (error) throw error
               toast.success('✅ 已保存')
               setEditingGroup(null)
-              await queryClient.invalidateQueries({ queryKey: ['m-stock-moves-v2'] })
               await queryClient.invalidateQueries({ queryKey: ['stock-moves-v2'] })
               await queryClient.invalidateQueries({ queryKey: ['sales-velocity-30d'] })
             } catch (e: any) {

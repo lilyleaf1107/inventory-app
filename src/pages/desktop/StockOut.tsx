@@ -67,7 +67,6 @@ export default function StockOutPage() {
   const [offlineNote, setOfflineNote] = useState('')
   const [remark, setRemark] = useState('')
   const trackingInputRef = useRef<HTMLInputElement>(null)
-  const bindTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ========== 出库人（同一账号可能对应多出库人） ==========
   const [operatorName, setOperatorName] = useState('')
@@ -290,6 +289,36 @@ export default function StockOutPage() {
     }
   }, [findProductByBarcode])
 
+  // 判断扫码内容：乱码 / 产品码(4位纯数字) / 单号
+  const classifyScanCode = (raw: string): { type: 'garbage' | 'product' | 'tracking'; value: string } => {
+    const v = raw.trim()
+    if (!v) return { type: 'garbage', value: v }
+    // 乱码检测：只允许字母和数字
+    if (!/^[A-Za-z0-9]+$/.test(v)) return { type: 'garbage', value: v }
+    // 4位纯数字 → 产品码
+    if (v.length === 4 && /^\d+$/.test(v)) return { type: 'product', value: v }
+    // 其余一律视为单号
+    return { type: 'tracking', value: v }
+  }
+
+  // 检查最近7天是否已有相同单号出库
+  const checkDuplicateTracking = useCallback(async (no: string): Promise<string | null> => {
+    const since = new Date()
+    since.setDate(since.getDate() - 7)
+    const { data, error } = await supabase
+      .from('stock_moves')
+      .select('created_at')
+      .eq('move_type', 'out')
+      .eq('tracking_no', no)
+      .gte('created_at', since.toISOString())
+      .order('created_at', { ascending: false })
+      .limit(1)
+    if (error) return null
+    if (!data || data.length === 0) return null
+    const d = new Date((data[0] as any).created_at)
+    return `${d.getMonth() + 1}月${d.getDate()}日`
+  }, [])
+
   // 快速模式：让扫码枪字符不落 input
   useEffect(() => {
     if (!quickMode) return
@@ -312,15 +341,24 @@ export default function StockOutPage() {
         document.activeElement &&
         (document.activeElement as HTMLElement).id === 'tracking_no'
       ) return
-      // 产品码固定4位，其余一律视为快递单号直接填入
-      if (code.length === 4) {
-        quickStockOut(code)
-      } else {
-        setTrackingNo(code)
-        setTrackingBound(true)
-        setShipMode('online')
-        toast.success(`📦 已填入单号：${code}`)
+      const cls = classifyScanCode(code)
+      if (cls.type === 'garbage') {
+        toast.warning('扫码内容异常，请重扫')
+        return
       }
+      if (cls.type === 'product') {
+        quickStockOut(cls.value)
+        return
+      }
+      // 单号
+      setTrackingNo(cls.value)
+      setTrackingBound(true)
+      setShipMode('online')
+      toast.success(`📦 已填入单号：${cls.value}`)
+      // 重复单号检测
+      checkDuplicateTracking(cls.value).then((date) => {
+        if (date) toast.warning(`该单号已于 ${date} 出库过，请注意是否重复`)
+      })
     },
     enabled: !isMobile,
   })
@@ -604,46 +642,37 @@ export default function StockOutPage() {
                   ref={trackingInputRef}
                   value={trackingNo}
                   onChange={(e) => {
-                    const val = e.target.value
-                    setTrackingNo(val)
+                    // 仅更新值，不自动绑定
+                    // 扫码枪扫完会自动发 Enter，由 onKeyDown Enter 触发绑定
+                    setTrackingNo(e.target.value)
                     setTrackingBound(false)
-                    // 防抖：扫码枪输入快，停止 300ms 后自动绑定
-                    if (bindTimerRef.current) clearTimeout(bindTimerRef.current)
-                    bindTimerRef.current = setTimeout(() => {
-                      const v = val.trim()
-                      if (!v) return
-                      if (v.length === 4) {
-                        quickStockOut(v)
-                        setTrackingNo('')
-                        setTrackingBound(false)
-                      } else {
-                        setTrackingNo(v)
-                        setTrackingBound(true)
-                        trackingInputRef.current?.blur()
-                        document.body.focus()
-                        toast.success(`✅ 已绑定单号：${v}`)
-                      }
-                    }, 300)
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault()
-                      if (bindTimerRef.current) clearTimeout(bindTimerRef.current)
                       const val = e.currentTarget.value.trim()
                       if (!val) {
                         toast.warning('请输入单号')
                         return
                       }
-                      if (val.length === 4) {
-                        quickStockOut(val)
+                      const cls = classifyScanCode(val)
+                      if (cls.type === 'garbage') {
+                        toast.warning('扫码内容异常，请重扫')
+                        return
+                      }
+                      if (cls.type === 'product') {
+                        quickStockOut(cls.value)
                         setTrackingNo('')
                         setTrackingBound(false)
                       } else {
-                        setTrackingNo(val)
+                        setTrackingNo(cls.value)
                         setTrackingBound(true)
                         trackingInputRef.current?.blur()
                         document.body.focus()
-                        toast.success(`✅ 已绑定单号：${val}`)
+                        toast.success(`✅ 已绑定单号：${cls.value}`)
+                        checkDuplicateTracking(cls.value).then((date) => {
+                          if (date) toast.warning(`该单号已于 ${date} 出库过，请注意是否重复`)
+                        })
                       }
                     }
                   }}

@@ -17,7 +17,7 @@ interface UseBarcodeGunOptions {
 export function useBarcodeGun({
   onScan,
   enabled = true,
-  maxInterval = 100,
+  maxInterval = 200,
   minLength = 3,
 }: UseBarcodeGunOptions) {
   const bufferRef = useRef('')

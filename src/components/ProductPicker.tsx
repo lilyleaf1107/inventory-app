@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Search, ImagePlus, Check } from 'lucide-react'
 import { supabase, getProductImageUrl } from '@/lib/supabase'
+import { useSalesVelocity30d } from '@/hooks/useLowStock'
 import type { Product } from '@/types'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -24,6 +25,7 @@ export default function ProductPicker({ open, onOpenChange, onSelect }: ProductP
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const { data: velocityMap } = useSalesVelocity30d()
 
   // 250ms 防抖：减少输入时的网络请求频率，提升响应速度
   useEffect(() => {
@@ -46,9 +48,21 @@ export default function ProductPicker({ open, onOpenChange, onSelect }: ProductP
     },
   })
 
+  // 无搜索词时，按30天出库量降序排列（常出库的产品排前面）
+  const sortedProducts = useMemo(() => {
+    if (!products) return []
+    if (search) return products
+    const vMap = velocityMap || new Map<string, number>()
+    return [...products].sort((a, b) => {
+      const va = vMap.get(a.id) || 0
+      const vb = vMap.get(b.id) || 0
+      return vb - va
+    })
+  }, [products, search, velocityMap])
+
   const selected = useMemo(
-    () => products?.find((p) => p.id === selectedId) || null,
-    [products, selectedId],
+    () => sortedProducts.find((p) => p.id === selectedId) || null,
+    [sortedProducts, selectedId],
   )
 
   const handleConfirm = () => {
@@ -90,13 +104,13 @@ export default function ProductPicker({ open, onOpenChange, onSelect }: ProductP
         <div className="flex-1 overflow-y-auto px-4">
           {isLoading ? (
             <div className="py-12 text-center text-muted-foreground">加载中...</div>
-          ) : products?.length === 0 ? (
+          ) : sortedProducts.length === 0 ? (
             <div className="py-12 text-center text-muted-foreground">
               没有找到产品
             </div>
           ) : (
             <div className="space-y-1 pb-2">
-              {products?.map((p) => (
+              {sortedProducts.map((p) => (
                 <button
                   key={p.id}
                   type="button"

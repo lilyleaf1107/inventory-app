@@ -843,10 +843,17 @@ export default function MobileProducts() {
         if (createLocId && createLocQty) {
           const qty = Number(createLocQty)
           if (qty > 0) {
-            const { error: invErr } = await supabase.from('inventory').insert({
-              product_id: created.id,
-              location_id: createLocId,
-              quantity: qty,
+            const { error: invErr } = await supabase.rpc('stock_in', {
+              p_product_id: created.id,
+              p_location_id: createLocId,
+              p_quantity: qty,
+              p_scan_mode: 'manual',
+              p_batch_no: null,
+              p_remark: null,
+              p_operator_id: null,
+              p_tracking_no: null,
+              p_is_offline: false,
+              p_operator_name: null,
             })
             if (invErr) throw invErr
           }
