@@ -42,23 +42,25 @@ export default function ProductPicker({ open, onOpenChange, onSelect }: ProductP
           `name.ilike.%${search}%,sku.ilike.%${search}%,barcode.ilike.%${search}%`,
         )
       }
-      const { data, error } = await query.limit(50)
+      // 产品不到1000个，全量查询后前端按销量排序，避免截断销量高的产品
+      const { data, error } = await query
       if (error) throw error
       return data as Product[]
     },
   })
 
-  // 无搜索词时，按30天出库量降序排列（常出库的产品排前面）
+  // 无论有无搜索词，都按30天出库量降序排列（常出库的产品排前面）
+  // 销量相同时按名称排序，保证顺序稳定
   const sortedProducts = useMemo(() => {
     if (!products) return []
-    if (search) return products
     const vMap = velocityMap || new Map<string, number>()
     return [...products].sort((a, b) => {
       const va = vMap.get(a.id) || 0
       const vb = vMap.get(b.id) || 0
-      return vb - va
+      if (vb !== va) return vb - va
+      return (a.name || '').localeCompare(b.name || '', 'zh')
     })
-  }, [products, search, velocityMap])
+  }, [products, velocityMap])
 
   const selected = useMemo(
     () => sortedProducts.find((p) => p.id === selectedId) || null,
