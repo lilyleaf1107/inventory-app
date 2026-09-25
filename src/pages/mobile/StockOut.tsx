@@ -142,6 +142,34 @@ export default function MobileStockOut() {
     },
   })
 
+  // 不记数量(track_qty=false)的产品可能没有库存记录，查所有库位供选择
+  const { data: allLocations } = useQuery({
+    queryKey: ['all-locations-stockout'],
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('locations')
+        .select(`id, code, description, warehouse:warehouses (id, name, code)`)
+        .order('code')
+      if (error) throw error
+      return data as any[]
+    },
+  })
+
+  const activeTrackQty = (activeProduct as any)?.track_qty !== false
+
+  // 库位列表：追踪产品用有库存的库位，不记数量产品用全部库位
+  const locationList = useMemo(() => {
+    if (!activeProduct) return []
+    if (activeTrackQty) return inventoryList || []
+    return (allLocations || []).map((loc) => ({
+      id: `loc-${loc.id}`,
+      location_id: loc.id,
+      quantity: 0,
+      location: loc,
+    }))
+  }, [activeProduct, activeTrackQty, inventoryList, allLocations])
+
   const activeTotalStock = useMemo(
     () => inventoryList?.reduce((s, i) => s + Number(i.quantity), 0) || 0,
     [inventoryList],
@@ -151,9 +179,9 @@ export default function MobileStockOut() {
     [inventoryList, activeLocationId],
   )
   useEffect(() => {
-    if (inventoryList && inventoryList.length > 0 && !activeLocationId) setActiveLocationId(inventoryList[0].location_id)
-    if (inventoryList && inventoryList.length === 0) setActiveLocationId('')
-  }, [inventoryList, activeLocationId])
+    if (locationList.length > 0 && !activeLocationId) setActiveLocationId(locationList[0].location_id)
+    if (locationList.length === 0) setActiveLocationId('')
+  }, [locationList, activeLocationId])
 
   // ============================================================
   // 加入清单
@@ -176,10 +204,26 @@ export default function MobileStockOut() {
       if (error) throw error
       invList = data as any[]
     }
+    const trackQty = (product as any).track_qty !== false
     if (!invList || invList.length === 0) {
-      toast.warning(`「${product.name}」无可用库存`)
-      return
+      if (trackQty) {
+        toast.warning(`「${product.name}」无可用库存`)
+        return
+      }
+      // 不记数量产品：无库存记录也允许出库，查第一个库位
+      const { data: locs, error: locErr } = await supabase
+        .from('locations')
+        .select(`id, code, warehouse:warehouses (id, name, code)`)
+        .order('code')
+        .limit(1)
+      if (locErr || !locs || locs.length === 0) {
+        toast.warning(`「${product.name}」无可用库位`)
+        return
+      }
+      const loc0 = locs[0] as any
+      invList = [{ location_id: loc0.id, quantity: 0, location: loc0 }] as any
     }
+    if (!invList || invList.length === 0) return
     let target: any
     if (!preferFirst && opts?.locationId) target = invList.find((i: any) => i.location_id === opts.locationId)
     if (!target) target = invList[0]
@@ -366,10 +410,13 @@ export default function MobileStockOut() {
     if (!activeLocationId) return toast.warning('请选库位')
     const qty = parseInt(activeQuantity, 10)
     if (!qty || qty <= 0) return toast.warning('数量必须>0')
-    const inv = inventoryList?.find((i) => i.location_id === activeLocationId)
-    if (!inv) return toast.warning('库位无效')
     const trackQty = (activeProduct as any).track_qty !== false
-    if (trackQty && qty > Number(inv.quantity)) return toast.error(`库存仅 ${inv.quantity}`)
+    const inv = inventoryList?.find((i) => i.location_id === activeLocationId)
+    if (trackQty) {
+      if (!inv) return toast.warning('库位无效')
+      if (qty > Number(inv.quantity)) return toast.error(`库存仅 ${inv.quantity}`)
+    }
+    // 不记数量产品：不要求有库存记录，直接出库
     await addProductToLines(activeProduct, { qty, scanMode: false, preferFirstLocation: false, locationId: activeLocationId })
     setActiveProduct(null)
     setActiveLocationId('')
@@ -384,7 +431,6 @@ export default function MobileStockOut() {
   }
 
   const activeQtyNum = parseInt(activeQuantity, 10) || 0
-  const activeTrackQty = (activeProduct as any)?.track_qty !== false
   const isOverActive = activeTrackQty && !!activeLocationId && activeQtyNum > activeLocationQty
 
   return (
@@ -577,7 +623,7 @@ export default function MobileStockOut() {
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-semibold truncate">{activeProduct.name}</div>
                   <div className="text-[11px] text-muted-foreground font-mono truncate">
-                    SKU {activeProduct.sku || '-'} · 总库存 {activeTotalStock}
+                    SKU {activeProduct.sku || '-'} · {activeTrackQty ? `总库存 ${activeTotalStock}` : '不计数'}
                   </div>
                 </div>
                 <button type="button" onClick={() => { setActiveProduct(null); setActiveLocationId('') }} className="p-1.5 rounded-md text-muted-foreground hover:bg-orange-100">
@@ -599,9 +645,9 @@ export default function MobileStockOut() {
               <>
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium">选择库位 *</Label>
-                  {invLoading ? (
+                  {invLoading && activeTrackQty ? (
                     <div className="h-9 border rounded-md text-xs text-muted-foreground px-3 flex items-center">加载中...</div>
-                  ) : inventoryList?.length === 0 ? (
+                  ) : locationList.length === 0 ? (
                     <div className="p-2 rounded-md bg-amber-50 text-amber-800 text-xs flex items-center gap-1.5">
                       <X className="h-3.5 w-3.5" /> 暂无库存
                     </div>
@@ -617,7 +663,7 @@ export default function MobileStockOut() {
                         />
                       </div>
                       <div className="space-y-1.5 max-h-52 overflow-y-auto">
-                        {inventoryList?.filter((inv) => {
+                        {locationList.filter((inv) => {
                           if (!activeLocSearch.trim()) return true
                           const kw = activeLocSearch.trim().toLowerCase()
                           const a = `${inv.location.warehouse.code}/${inv.location.code}`.toLowerCase()
@@ -644,8 +690,10 @@ export default function MobileStockOut() {
                                 </div>
                               </div>
                               <div className="text-right">
-                                <div className="text-sm font-bold text-blue-900">{inv.quantity}</div>
-                                <div className="text-[10px] text-muted-foreground">{activeProduct.unit}</div>
+                                <div className="text-sm font-bold text-blue-900">{activeTrackQty ? inv.quantity : '不计数'}</div>
+                                {activeTrackQty && (
+                                  <div className="text-[10px] text-muted-foreground">{activeProduct.unit}</div>
+                                )}
                               </div>
                             </button>
                           )
@@ -657,7 +705,7 @@ export default function MobileStockOut() {
 
                 <div className="flex items-center gap-2">
                   <div className="flex-1">
-                    <Label className="text-xs font-medium">数量 * （可用：{activeLocationQty}）</Label>
+                    <Label className="text-xs font-medium">数量 * {activeTrackQty ? `（可用：${activeLocationQty}）` : '（不计数）'}</Label>
                     <div className="flex items-center gap-1.5 mt-1 bg-white border rounded-lg p-0.5">
                       <button
                         type="button"
@@ -794,7 +842,7 @@ export default function MobileStockOut() {
                       </div>
                       <div className="text-right">
                         <div className="text-xs text-muted-foreground">
-                          可用 {l.locationAvailable}
+                          {(l.product as any).track_qty !== false ? `可用 ${l.locationAvailable}` : '不计数'}
                         </div>
                         <div className="text-base font-bold text-orange-700">
                           × {l.unit}

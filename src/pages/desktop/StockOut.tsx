@@ -67,6 +67,7 @@ export default function StockOutPage() {
   const [offlineNote, setOfflineNote] = useState('')
   const [remark, setRemark] = useState('')
   const trackingInputRef = useRef<HTMLInputElement>(null)
+  const bindTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ========== 出库人（同一账号可能对应多出库人） ==========
   const [operatorName, setOperatorName] = useState('')
@@ -158,6 +159,39 @@ export default function StockOutPage() {
     },
   })
 
+  // 不记数量(track_qty=false)的产品可能没有库存记录，需要查所有库位供选择
+  const { data: allLocations } = useQuery({
+    queryKey: ['all-locations-stockout'],
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('locations')
+        .select(`
+          id, code, description,
+          warehouse:warehouses (id, name, code)
+        `)
+        .order('code')
+      if (error) throw error
+      return data as any[]
+    },
+  })
+
+  // 当前产品是否追踪库存
+  const activeTrackQty = (activeProduct as any)?.track_qty !== false
+
+  // 库位列表：追踪产品用有库存的库位，不记数量产品用全部库位
+  const locationList = useMemo(() => {
+    if (!activeProduct) return []
+    if (activeTrackQty) return inventoryList || []
+    // 不记数量：所有库位都可选，quantity 统一显示 0
+    return (allLocations || []).map((loc) => ({
+      id: `loc-${loc.id}`,
+      location_id: loc.id,
+      quantity: 0,
+      location: loc,
+    }))
+  }, [activeProduct, activeTrackQty, inventoryList, allLocations])
+
   const activeTotalStock = useMemo(
     () => inventoryList?.reduce((s, i) => s + Number(i.quantity), 0) || 0,
     [inventoryList],
@@ -168,15 +202,15 @@ export default function StockOutPage() {
     return inv ? Number(inv.quantity) : 0
   }, [inventoryList, activeLocationId])
 
-  // 选产品后自动选最近入库库位
+  // 选产品后自动选第一个库位
   useEffect(() => {
-    if (inventoryList && inventoryList.length > 0 && !activeLocationId) {
-      setActiveLocationId(inventoryList[0].location_id)
+    if (locationList.length > 0 && !activeLocationId) {
+      setActiveLocationId(locationList[0].location_id)
     }
-    if (inventoryList && inventoryList.length === 0) {
+    if (locationList.length === 0) {
       setActiveLocationId('')
     }
-  }, [inventoryList, activeLocationId])
+  }, [locationList, activeLocationId])
 
   // ============================================================
   // 扫码枪：定位产品后，加入清单（或数量 +1，如果同一产品+库位已在清单）
@@ -206,10 +240,27 @@ export default function StockOutPage() {
       invList = data as any[]
     }
 
+    const trackQty = (product as any).track_qty !== false
+
+    // 不记数量的产品：没有库存记录也允许出库，查所有库位取第一个
     if (!invList || invList.length === 0) {
-      toast.warning(`「${product.name}」无可用库存`)
-      return
+      if (trackQty) {
+        toast.warning(`「${product.name}」无可用库存`)
+        return
+      }
+      const { data: locs, error: locErr } = await supabase
+        .from('locations')
+        .select(`id, code, warehouse:warehouses (id, name, code)`)
+        .order('code')
+        .limit(1)
+      if (locErr || !locs || locs.length === 0) {
+        toast.warning(`「${product.name}」无可用库位`)
+        return
+      }
+      const loc0 = locs[0] as any
+      invList = [{ location_id: loc0.id, quantity: 0, location: loc0 }] as any
     }
+    if (!invList || invList.length === 0) return
 
     const target = preferFirst ? invList[0] : (invList.find((i: any) => i.location_id === activeLocationId) || invList[0])
     const loc = (target as any).location
@@ -319,6 +370,35 @@ export default function StockOutPage() {
     return `${d.getMonth() + 1}月${d.getDate()}日`
   }, [])
 
+  // 单号输入框绑定逻辑（Enter 或停顿自动触发都走这里）
+  const handleTrackingBind = useCallback((raw: string) => {
+    const val = raw.trim()
+    if (!val) {
+      toast.warning('请输入单号')
+      return
+    }
+    const cls = classifyScanCode(val)
+    if (cls.type === 'garbage') {
+      toast.warning('扫码内容异常，请重扫')
+      return
+    }
+    if (cls.type === 'product') {
+      quickStockOut(cls.value)
+      setTrackingNo('')
+      setTrackingBound(false)
+      return
+    }
+    // 单号
+    setTrackingNo(cls.value)
+    setTrackingBound(true)
+    trackingInputRef.current?.blur()
+    document.body.focus()
+    toast.success(`✅ 已绑定单号：${cls.value}`)
+    checkDuplicateTracking(cls.value).then((date) => {
+      if (date) toast.warning(`该单号已于 ${date} 出库过，请注意是否重复`)
+    })
+  }, [quickStockOut, checkDuplicateTracking])
+
   // 快速模式：让扫码枪字符不落 input
   useEffect(() => {
     if (!quickMode) return
@@ -336,11 +416,9 @@ export default function StockOutPage() {
 
   useBarcodeGun({
     onScan: (code) => {
-      // 单号输入框聚焦时，由输入框自身的 onChange/onKeyDown 处理，避免重复
-      if (
-        document.activeElement &&
-        (document.activeElement as HTMLElement).id === 'tracking_no'
-      ) return
+      // 任何输入框聚焦时都跳过，由输入框自身处理（避免打字停顿误触发）
+      const ae = document.activeElement as HTMLElement | null
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return
       const cls = classifyScanCode(code)
       if (cls.type === 'garbage') {
         toast.warning('扫码内容异常，请重扫')
@@ -520,16 +598,19 @@ export default function StockOutPage() {
       toast.warning('数量必须大于 0')
       return
     }
-    const inv = inventoryList?.find((i) => i.location_id === activeLocationId)
-    if (!inv) {
-      toast.warning('请选择有效库位')
-      return
-    }
     const trackQty = (activeProduct as any).track_qty !== false
-    if (trackQty && qty > Number(inv.quantity)) {
-      toast.error(`库存不足，该库位仅有 ${inv.quantity} ${activeProduct.unit}`)
-      return
+    const inv = inventoryList?.find((i) => i.location_id === activeLocationId)
+    if (trackQty) {
+      if (!inv) {
+        toast.warning('请选择有效库位')
+        return
+      }
+      if (qty > Number(inv.quantity)) {
+        toast.error(`库存不足，该库位仅有 ${inv.quantity} ${activeProduct.unit}`)
+        return
+      }
     }
+    // 不记数量产品：不要求有库存记录，直接出库
     await addProductToLines(activeProduct, {
       qty,
       scanMode: false,
@@ -550,7 +631,6 @@ export default function StockOutPage() {
   }
 
   const activeQtyNum = parseInt(activeQuantity, 10) || 0
-  const activeTrackQty = (activeProduct as any)?.track_qty !== false
   const isOverStockActive = activeTrackQty && !!activeLocationId && activeQtyNum > activeLocationQty
 
   // ============================================================
@@ -634,7 +714,7 @@ export default function StockOutPage() {
           {shipMode === 'online' ? (
             <div className="space-y-2">
               <Label htmlFor="tracking_no" className="text-sm font-medium">
-                快递单号（可扫码枪扫入，回车绑定）
+                快递单号（扫码枪扫入，输完自动绑定）
               </Label>
               <div className="flex gap-2">
                 <Input
@@ -642,38 +722,22 @@ export default function StockOutPage() {
                   ref={trackingInputRef}
                   value={trackingNo}
                   onChange={(e) => {
-                    // 仅更新值，不自动绑定
-                    // 扫码枪扫完会自动发 Enter，由 onKeyDown Enter 触发绑定
                     setTrackingNo(e.target.value)
                     setTrackingBound(false)
+                    // 停顿200ms自动绑定：扫码枪字符间隔<50ms，连续输完后停顿触发
+                    // 人手输入每字符间隔>200ms，不会误触发（需手动点绑定或按回车）
+                    if (bindTimerRef.current) clearTimeout(bindTimerRef.current)
+                    bindTimerRef.current = setTimeout(() => {
+                      if (e.target.value.trim()) {
+                        handleTrackingBind(e.target.value)
+                      }
+                    }, 200)
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault()
-                      const val = e.currentTarget.value.trim()
-                      if (!val) {
-                        toast.warning('请输入单号')
-                        return
-                      }
-                      const cls = classifyScanCode(val)
-                      if (cls.type === 'garbage') {
-                        toast.warning('扫码内容异常，请重扫')
-                        return
-                      }
-                      if (cls.type === 'product') {
-                        quickStockOut(cls.value)
-                        setTrackingNo('')
-                        setTrackingBound(false)
-                      } else {
-                        setTrackingNo(cls.value)
-                        setTrackingBound(true)
-                        trackingInputRef.current?.blur()
-                        document.body.focus()
-                        toast.success(`✅ 已绑定单号：${cls.value}`)
-                        checkDuplicateTracking(cls.value).then((date) => {
-                          if (date) toast.warning(`该单号已于 ${date} 出库过，请注意是否重复`)
-                        })
-                      }
+                      if (bindTimerRef.current) clearTimeout(bindTimerRef.current)
+                      handleTrackingBind(e.currentTarget.value)
                     }
                   }}
                   placeholder="例如：SF1234567890，输完自动绑定"
@@ -801,12 +865,14 @@ export default function StockOutPage() {
                       </div>
                       <div className="text-right flex-shrink-0">
                         <div className="text-xl font-bold text-orange-700">
-                          {activeTotalStock}
-                          <span className="text-xs text-muted-foreground font-normal ml-1">
-                            {activeProduct.unit}
-                          </span>
+                          {activeTrackQty ? activeTotalStock : '不计数'}
+                          {activeTrackQty && (
+                            <span className="text-xs text-muted-foreground font-normal ml-1">
+                              {activeProduct.unit}
+                            </span>
+                          )}
                         </div>
-                        <div className="text-xs text-muted-foreground">总库存</div>
+                        <div className="text-xs text-muted-foreground">{activeTrackQty ? '总库存' : '不追踪数量'}</div>
                       </div>
                       <div className="flex gap-2">
                         <Button type="button" variant="outline" size="sm" onClick={() => setPickerOpen(true)}>
@@ -848,9 +914,9 @@ export default function StockOutPage() {
                   <>
                     <div className="space-y-2">
                       <Label className="text-sm font-medium">选择库位 *</Label>
-                      {invLoading ? (
+                      {invLoading && activeTrackQty ? (
                         <div className="h-11 flex items-center text-sm text-muted-foreground px-3 border rounded-md">加载中...</div>
-                      ) : inventoryList?.length === 0 ? (
+                      ) : locationList.length === 0 ? (
                         <div className="p-3 border rounded-md bg-amber-50 text-amber-800 text-sm flex items-center gap-2">
                           <AlertTriangle className="h-4 w-4" /> 暂无库存，请先入库
                         </div>
@@ -866,8 +932,8 @@ export default function StockOutPage() {
                             />
                           </div>
                           <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-                            {inventoryList
-                              ?.filter((inv) => {
+                            {locationList
+                              .filter((inv) => {
                                 if (!activeLocSearch.trim()) return true
                                 const kw = activeLocSearch.trim().toLowerCase()
                                 const a = `${inv.location.warehouse.code} / ${inv.location.code}`.toLowerCase()
@@ -904,8 +970,10 @@ export default function StockOutPage() {
                                       </div>
                                     </div>
                                     <div className="text-right flex-shrink-0 ml-2">
-                                      <div className="font-bold text-blue-900">{inv.quantity}</div>
-                                      <div className="text-[10px] text-muted-foreground">{activeProduct.unit}</div>
+                                      <div className="font-bold text-blue-900">{activeTrackQty ? inv.quantity : '不计数'}</div>
+                                      {activeTrackQty && (
+                                        <div className="text-[10px] text-muted-foreground">{activeProduct.unit}</div>
+                                      )}
                                     </div>
                                   </button>
                                 )
@@ -920,7 +988,7 @@ export default function StockOutPage() {
                         <Label className="text-sm font-medium">数量 *</Label>
                         {activeLocationId && (
                           <span className="text-xs text-muted-foreground">
-                            可用：{activeLocationQty} {activeProduct.unit}
+                            {activeTrackQty ? `可用：${activeLocationQty} ${activeProduct.unit}` : '不计数'}
                           </span>
                         )}
                       </div>
@@ -1060,12 +1128,12 @@ export default function StockOutPage() {
 
                       {/* 库位 */}
                       <div className="col-span-2 md:hidden text-right text-[11px] text-muted-foreground font-mono">
-                        {l.locationLabel} · 可用 {l.locationAvailable}
+                        {l.locationLabel} · {(l.product as any).track_qty !== false ? `可用 ${l.locationAvailable}` : '不计数'}
                       </div>
                       <div className="hidden md:block md:col-span-3 text-sm">
                         <div className="font-mono font-medium text-blue-800">{l.locationLabel}</div>
                         <div className="text-[11px] text-muted-foreground">
-                          可用 {l.locationAvailable} {l.unit}
+                          {(l.product as any).track_qty !== false ? `可用 ${l.locationAvailable} ${l.unit}` : '不计数'}
                         </div>
                       </div>
 
@@ -1218,7 +1286,7 @@ export default function StockOutPage() {
                             {inv.location.warehouse.code} / {inv.location.code}
                           </span>
                           <span className="font-bold text-blue-900">
-                            {inv.quantity} <span className="font-normal text-xs text-muted-foreground">{activeProduct.unit}</span>
+                            {activeTrackQty ? `${inv.quantity} ${activeProduct.unit}` : '不计数'}
                           </span>
                         </div>
                         <div className="text-xs text-muted-foreground truncate mb-2">
