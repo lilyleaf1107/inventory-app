@@ -472,7 +472,7 @@ export default function MobileStockOut() {
       toast.success(`✅ 批量出库成功：${linesSummary.skuCount}种/${linesSummary.totalQty}件（${tag}）`, { duration: 3000 })
       queryClient.invalidateQueries({ queryKey: ['inventory'] })
       queryClient.invalidateQueries({ queryKey: ['product-inventory'] })
-      queryClient.invalidateQueries({ queryKey: ['stock-moves'] })
+      queryClient.invalidateQueries({ queryKey: ['stock-moves-v2'] })
       // 需求3：提交成功后清空状态，保留出库人
       setLines([])
       setActiveProduct(null)

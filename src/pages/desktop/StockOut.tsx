@@ -649,7 +649,7 @@ export default function StockOutPage() {
       )
       queryClient.invalidateQueries({ queryKey: ['inventory'] })
       queryClient.invalidateQueries({ queryKey: ['product-inventory'] })
-      queryClient.invalidateQueries({ queryKey: ['stock-moves'] })
+      queryClient.invalidateQueries({ queryKey: ['stock-moves-v2'] })
 
       // 需求3：整单提交成功后，清空【单号、清单、出库方式、备注、线下备注】，保留出库人
       setLines([])

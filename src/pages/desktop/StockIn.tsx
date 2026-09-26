@@ -204,7 +204,7 @@ export default function StockInPage() {
     onSuccess: () => {
       toast.success('入库成功')
       queryClient.invalidateQueries({ queryKey: ['inventory'] })
-      queryClient.invalidateQueries({ queryKey: ['stock-moves'] })
+      queryClient.invalidateQueries({ queryKey: ['stock-moves-v2'] })
       queryClient.invalidateQueries({ queryKey: ['product-inventory'] })
       setQuantity('')
       setBatchNo('')

@@ -771,7 +771,7 @@ export default function StockMovesPage() {
               if (error) throw error
               toast.success('✅ 已保存')
               setEditingGroup(null)
-              await queryClient.invalidateQueries({ queryKey: ['stock-moves'] })
+              await queryClient.invalidateQueries({ queryKey: ['stock-moves-v2'] })
               await queryClient.invalidateQueries({ queryKey: ['sales-velocity-30d'] })
             } catch (e: any) {
               console.error('[编辑订单失败]', e)

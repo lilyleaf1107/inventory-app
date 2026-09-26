@@ -185,7 +185,7 @@ export default function MobileScan() {
     onSuccess: () => {
       toast.success(mode === 'in' ? '入库成功' : '出库成功')
       queryClient.invalidateQueries({ queryKey: ['inventory'] })
-      queryClient.invalidateQueries({ queryKey: ['stock-moves'] })
+      queryClient.invalidateQueries({ queryKey: ['stock-moves-v2'] })
       queryClient.invalidateQueries({ queryKey: ['product-inventory'] })
       queryClient.invalidateQueries({ queryKey: ['mobile-stats'] })
       // 清空状态，准备下一次扫码
