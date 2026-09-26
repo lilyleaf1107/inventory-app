@@ -44,6 +44,7 @@ const navItems: NavItem[] = [
   { to: '/warehouses', label: '仓库管理', icon: Warehouse },
   { to: '/stock-in', label: '入库', icon: ArrowDownToLine, requireWrite: true },
   { to: '/stock-out', label: '出库', icon: ArrowUpFromLine, requireWrite: true },
+  { to: '/bundles', label: '组合管理', icon: Boxes, requireWrite: true },
   { to: '/inventory', label: '库存查询', icon: Search },
   { to: '/out-of-stock', label: '缺货提醒', icon: AlertTriangle },
   { to: '/low-stock', label: '低库存预警', icon: Gauge },

@@ -300,6 +300,26 @@ export default function MobileSettings() {
                 className="h-9 text-sm"
               />
             </div>
+            <div className="space-y-1">
+              <Label className="text-xs">出库提交码</Label>
+              <Input
+                value={settings.submitCode}
+                onChange={(e) => update({ submitCode: e.target.value.trim() })}
+                placeholder="如 SUBMIT"
+                className="h-9 text-sm"
+              />
+              <p className="text-[10px] text-muted-foreground">扫到此码自动提交出库</p>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">出库清空码</Label>
+              <Input
+                value={settings.clearCode}
+                onChange={(e) => update({ clearCode: e.target.value.trim() })}
+                placeholder="如 CLEAR"
+                className="h-9 text-sm"
+              />
+              <p className="text-[10px] text-muted-foreground">扫到此码清空当前清单</p>
+            </div>
           </div>
         </CardContent>
       </Card>

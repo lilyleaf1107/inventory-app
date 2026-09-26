@@ -284,6 +284,7 @@ function MobileHomeInner() {
       { to: '/m/warehouses', label: '仓库管理', desc: '仓库与库位', icon: Warehouse, iconClass: 'text-indigo-600', bgClass: 'bg-indigo-50', requireWrite: false, requireAdmin: false },
       { to: '/m/stock-in', label: '入库', desc: '扫码/手动入库操作', icon: ArrowDownToLine, iconClass: 'text-emerald-600', bgClass: 'bg-emerald-50', requireWrite: true, requireAdmin: false },
       { to: '/m/stock-out', label: '出库', desc: '扫码/手动出库操作', icon: ArrowUpFromLine, iconClass: 'text-amber-600', bgClass: 'bg-amber-50', requireWrite: true, requireAdmin: false },
+      { to: '/m/bundles', label: '组合管理', desc: '预设组合，扫组合码批量出库', icon: Boxes, iconClass: 'text-indigo-600', bgClass: 'bg-indigo-50', requireWrite: true, requireAdmin: false },
       { to: '/m/inventory', label: '库存查询', desc: '搜索库存及分布', icon: Search, iconClass: 'text-sky-600', bgClass: 'bg-sky-50', requireWrite: false, requireAdmin: false },
       {
         to: '/m/out-of-stock',

@@ -23,10 +23,13 @@ import {
   RefreshCcw,
   Tag,
   Send,
+  Boxes,
 } from 'lucide-react'
 import { supabase, getProductImageUrl } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
-import type { Product, Location, Inventory } from '@/types'
+import { useBarcodeGun } from '@/hooks/useBarcodeGun'
+import { getSettings } from '@/lib/settings'
+import type { Product, Location, Inventory, ProductBundle } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -73,6 +76,16 @@ export default function MobileStockOut() {
   const [offlineNote, setOfflineNote] = useState('')
   const [remark, setRemark] = useState('')
   const [operatorName, setOperatorName] = useState('')
+  const trackingInputRef = useRef<HTMLInputElement>(null)
+  const bindTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // 在线模式未绑定时自动聚焦单号输入框（PDA蓝牙扫码枪直接扫入）
+  useEffect(() => {
+    if (shipMode === 'online' && !trackingBound) {
+      const t = setTimeout(() => trackingInputRef.current?.focus(), 100)
+      return () => clearTimeout(t)
+    }
+  }, [shipMode, trackingBound])
   const { data: profileList = [] } = useQuery({
     queryKey: ['profiles-drop-stockout'],
     staleTime: 5 * 60 * 1000,
@@ -98,6 +111,29 @@ export default function MobileStockOut() {
   // ==== 清单 ====
   const [lines, setLines] = useState<OutboundLineItem[]>([])
   const [submitting, setSubmitting] = useState(false)
+
+  // ==== 组合选择 ====
+  const [bundlePickerOpen, setBundlePickerOpen] = useState(false)
+  const { data: bundleList = [] } = useQuery({
+    queryKey: ['product-bundles'],
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('product_bundles')
+        .select(`
+          *,
+          product_bundle_items (
+            id, bundle_id, product_id, quantity,
+            product:products ( id, name, sku, barcode, unit, image_path, track_qty )
+          )
+        `)
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      return data as (ProductBundle & {
+        product_bundle_items: { product: Product; quantity: number; product_id: string }[]
+      })[]
+    },
+  })
 
   // ============================================================
   // 查产品（barcode/sku 双匹配）
@@ -262,14 +298,61 @@ export default function MobileStockOut() {
   }, [inventoryList, activeProduct?.id])
 
   // ============================================================
+  // 组合：把组合内所有产品一次性加入清单
+  // ============================================================
+  const expandBundleToLines = useCallback(async (bundle: ProductBundle & {
+    product_bundle_items: { product: Product; quantity: number; product_id: string }[]
+  }) => {
+    if (!bundle.product_bundle_items || bundle.product_bundle_items.length === 0) {
+      toast.warning(`组合「${bundle.name}」没有产品`)
+      return
+    }
+    for (const item of bundle.product_bundle_items) {
+      await addProductToLines(item.product, { qty: item.quantity, scanMode: true, preferFirstLocation: true })
+    }
+    toast.success(`📦 组合「${bundle.name}」已展开`, { duration: 2500 })
+  }, [addProductToLines])
+
+  // ============================================================
   // 扫产品码 → 加入清单
   // ============================================================
+  // submitOutbound 在后面定义，用 ref 避免 TDZ
+  const submitOutboundRef = useRef<() => Promise<void>>(async () => {})
+
   // 扫产品码；扫不到 → 兜底视为快递单号自动绑定（不用先切模式/选框）
   const findProductByBarcode = useCallback(async (barcode: string) => {
+    const code = barcode.trim()
+    const { submitCode, clearCode } = getSettings()
+
+    // 提交码：直接提交出库
+    if (submitCode && code === submitCode) {
+      if (lines.length === 0) {
+        toast.warning('清单为空，无需提交')
+        return
+      }
+      await submitOutboundRef.current()
+      return
+    }
+    // 清空码：清空清单
+    if (clearCode && code === clearCode) {
+      if (lines.length === 0) return
+      setLines([])
+      setTrackingNo('')
+      setTrackingBound(false)
+      toast.success('已清空出库清单')
+      return
+    }
+
+    // 组合码：匹配组合编码 → 一次性展开加入清单
+    const matchedBundle = bundleList.find((b) => b.code === code)
+    if (matchedBundle) {
+      await expandBundleToLines(matchedBundle)
+      return
+    }
+
     try {
-      const p = await resolveProductByCode(barcode)
+      const p = await resolveProductByCode(code)
       if (!p) {
-        const code = barcode.trim()
         setTrackingNo(code)
         setTrackingBound(true)
         setShipMode('online')
@@ -282,7 +365,16 @@ export default function MobileStockOut() {
     } catch (err: any) {
       toast.error(err.message || '识别失败')
     }
-  }, [resolveProductByCode, addProductToLines])
+  }, [resolveProductByCode, addProductToLines, expandBundleToLines, bundleList, lines])
+
+  // PDA蓝牙扫码枪：全局监听（输入框聚焦时由输入框自身处理）
+  useBarcodeGun({
+    onScan: (code) => {
+      const ae = document.activeElement as HTMLElement | null
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return
+      findProductByBarcode(code.trim())
+    },
+  })
 
   // 相机扫码回调（产品或单号）
   const handleScannerResult = useCallback(async (code: string) => {
@@ -358,7 +450,8 @@ export default function MobileStockOut() {
         const trackQty = (l.product as any).track_qty !== false
         if (trackQty && l.quantity > l.locationAvailable) {
           failReason = `「${l.product.name}」在 ${l.locationLabel} 库存仅剩 ${l.locationAvailable}`
-          return toast.error(failReason)
+          toast.error(failReason)
+          return
         }
         const { error } = await supabase.rpc('stock_out', {
           p_product_id: l.product.id,
@@ -401,6 +494,8 @@ export default function MobileStockOut() {
     lines, linesSummary, shipModeValid, shipMode, offlineNote, quickMode, remark,
     trackingBound, trackingNo, user, queryClient, operatorName,
   ])
+  // 更新 ref 供 findProductByBarcode 调用
+  submitOutboundRef.current = submitOutbound
 
   // ============================================================
   // 手动选产品 → 加清单
@@ -413,8 +508,8 @@ export default function MobileStockOut() {
     const trackQty = (activeProduct as any).track_qty !== false
     const inv = inventoryList?.find((i) => i.location_id === activeLocationId)
     if (trackQty) {
-      if (!inv) return toast.warning('库位无效')
-      if (qty > Number(inv.quantity)) return toast.error(`库存仅 ${inv.quantity}`)
+      if (!inv) { toast.warning('库位无效'); return }
+      if (qty > Number(inv.quantity)) { toast.error(`库存仅 ${inv.quantity}`); return }
     }
     // 不记数量产品：不要求有库存记录，直接出库
     await addProductToLines(activeProduct, { qty, scanMode: false, preferFirstLocation: false, locationId: activeLocationId })
@@ -508,12 +603,31 @@ export default function MobileStockOut() {
                 <Label className="text-xs font-medium">快递单号</Label>
                 <div className="flex gap-2">
                   <Input
+                    ref={trackingInputRef}
                     value={trackingNo}
-                    onChange={(e) => { setTrackingNo(e.target.value); setTrackingBound(false) }}
+                    onChange={(e) => {
+                      setTrackingNo(e.target.value)
+                      setTrackingBound(false)
+                      // 停顿200ms自动绑定（PDA蓝牙扫码枪）
+                      if (bindTimerRef.current) clearTimeout(bindTimerRef.current)
+                      bindTimerRef.current = setTimeout(() => {
+                        const v = e.target.value.trim()
+                        if (v) {
+                          setTrackingBound(true)
+                          toast.success(`✅ 已绑定：${v}`)
+                          trackingInputRef.current?.blur()
+                        }
+                      }, 200)
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault()
-                        if (trackingNo.trim()) { setTrackingBound(true); toast.success(`✅ 已绑定：${trackingNo.trim()}`) }
+                        if (bindTimerRef.current) clearTimeout(bindTimerRef.current)
+                        if (trackingNo.trim()) {
+                          setTrackingBound(true)
+                          toast.success(`✅ 已绑定：${trackingNo.trim()}`)
+                          trackingInputRef.current?.blur()
+                        }
                       }
                     }}
                     placeholder="输入或扫快递单号"
@@ -606,6 +720,9 @@ export default function MobileStockOut() {
               <div className="flex gap-1">
                 <Button type="button" variant="outline" size="sm" className="text-xs h-8" onClick={() => setPickerOpen(true)}>
                   <Package className="h-3.5 w-3.5 mr-1" /> 手动选
+                </Button>
+                <Button type="button" variant="outline" size="sm" className="text-xs h-8" onClick={() => setBundlePickerOpen(true)}>
+                  <Boxes className="h-3.5 w-3.5 mr-1 text-indigo-600" /> 组合
                 </Button>
                 <Button type="button" variant="outline" size="sm" className="text-xs h-8" onClick={() => { setScannerMode('product'); setScannerOpen(true) }}>
                   <Camera className="h-3.5 w-3.5 mr-1" /> 扫码
@@ -934,6 +1051,70 @@ export default function MobileStockOut() {
           onScan={handleScannerResult}
           onClose={() => setScannerOpen(false)}
         />
+      )}
+
+      {/* 组合选择弹窗 */}
+      {bundlePickerOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setBundlePickerOpen(false)}
+        >
+          <div
+            className="bg-background rounded-xl shadow-xl max-w-sm w-full max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-3 border-b">
+              <h3 className="font-bold text-sm flex items-center gap-1.5">
+                <Boxes className="h-4 w-4 text-indigo-600" />
+                选组合出库
+              </h3>
+              <button onClick={() => setBundlePickerOpen(false)} className="text-muted-foreground">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-3 space-y-2">
+              {bundleList.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground text-sm">
+                  还没有组合
+                </div>
+              ) : (
+                bundleList.map((b) => (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => {
+                      expandBundleToLines(b)
+                      setBundlePickerOpen(false)
+                    }}
+                    className="w-full text-left p-2.5 rounded-lg border bg-indigo-50/30 hover:bg-indigo-100/50 transition"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-sm flex items-center gap-1">
+                          <Boxes className="h-3.5 w-3.5 text-indigo-600 flex-shrink-0" />
+                          <span className="truncate">{b.name}</span>
+                        </div>
+                        <div className="text-[10px] text-muted-foreground font-mono">
+                          {b.code} · {b.product_bundle_items?.length || 0} 个产品
+                        </div>
+                      </div>
+                      <Plus className="h-4 w-4 text-indigo-500 flex-shrink-0" />
+                    </div>
+                    {b.product_bundle_items && b.product_bundle_items.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {b.product_bundle_items.map((item) => (
+                          <span key={item.product_id} className="text-[9px] bg-white border rounded px-1 py-0.5">
+                            {item.product?.name || '未知'} ×{item.quantity}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

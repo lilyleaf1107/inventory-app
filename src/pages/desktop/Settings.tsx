@@ -312,6 +312,24 @@ export default function SettingsPage() {
               />
               <p className="text-xs text-muted-foreground">超过此间隔视为新一次扫码</p>
             </div>
+            <div className="space-y-2">
+              <Label>出库提交码</Label>
+              <Input
+                value={settings.submitCode}
+                onChange={(e) => update({ submitCode: e.target.value.trim() })}
+                placeholder="如 SUBMIT"
+              />
+              <p className="text-xs text-muted-foreground">扫码枪扫到此码自动提交当前出库（留空则禁用）</p>
+            </div>
+            <div className="space-y-2">
+              <Label>出库清空码</Label>
+              <Input
+                value={settings.clearCode}
+                onChange={(e) => update({ clearCode: e.target.value.trim() })}
+                placeholder="如 CLEAR"
+              />
+              <p className="text-xs text-muted-foreground">扫码枪扫到此码清空当前出库清单（留空则禁用）</p>
+            </div>
           </div>
         </CardContent>
       </Card>

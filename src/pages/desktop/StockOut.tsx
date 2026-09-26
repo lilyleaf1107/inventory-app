@@ -20,12 +20,14 @@ import {
   ClipboardList,
   RefreshCcw,
   Tag,
+  Boxes,
 } from 'lucide-react'
 import { supabase, getProductImageUrl } from '@/lib/supabase'
+import { getSettings } from '@/lib/settings'
 import { useAuthStore } from '@/store/auth'
 import { useBarcodeGun } from '@/hooks/useBarcodeGun'
 import { useDevice } from '@/hooks/useDevice'
-import type { Product, Inventory, Location } from '@/types'
+import type { Product, Inventory, Location, ProductBundle } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -107,6 +109,35 @@ export default function StockOutPage() {
   const [quickMode, setQuickMode] = useState(false)
   const [searchingBarcode, setSearchingBarcode] = useState(false)
   const processingRef = useRef(false)
+
+  // ========== 组合选择 ==========
+  const [bundlePickerOpen, setBundlePickerOpen] = useState(false)
+  const { data: bundleList = [] } = useQuery({
+    queryKey: ['product-bundles'],
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('product_bundles')
+        .select(`
+          *,
+          product_bundle_items (
+            id, bundle_id, product_id, quantity,
+            product:products ( id, name, sku, barcode, unit, image_path, track_qty )
+          )
+        `)
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      return data as (ProductBundle & {
+        product_bundle_items: {
+          id: string
+          bundle_id: string
+          product_id: string
+          quantity: number
+          product: Product
+        }[]
+      })[]
+    },
+  })
 
   // ========== 提交状态 ==========
   const [submitting, setSubmitting] = useState(false)
@@ -304,11 +335,60 @@ export default function StockOutPage() {
     toast.success(`已加入清单：${product.name} × ${qty}（${locLabel}）`, { duration: 1800 })
   }, [inventoryList, activeProduct?.id, activeLocationId])
 
+  // ============================================================
+  // 组合：把组合内所有产品按设定数量一次性加入清单
+  // ============================================================
+  const expandBundleToLines = useCallback(async (bundle: ProductBundle & {
+    product_bundle_items: { product: Product; quantity: number; product_id: string }[]
+  }) => {
+    if (!bundle.product_bundle_items || bundle.product_bundle_items.length === 0) {
+      toast.warning(`组合「${bundle.name}」没有产品`)
+      return
+    }
+    for (const item of bundle.product_bundle_items) {
+      // 逐个产品加入清单（复用 addProductToLines 的库存查询和合并逻辑）
+      await addProductToLines(item.product, { qty: item.quantity, scanMode: true, preferFirstLocation: true })
+    }
+    toast.success(`📦 组合「${bundle.name}」已展开（${bundle.product_bundle_items.length} 个产品）`, { duration: 2500 })
+  }, [addProductToLines])
+
+  // submitOutbound 在后面定义，用 ref 避免 TDZ — 在 findProductByBarcode 中通过 ref 调用
+  const submitOutboundRef = useRef<() => Promise<void>>(async () => {})
+
   // 通过条形码查找产品 → 加入清单；若完全匹配不到产品/库位 → 兜底填快递单号（扫单号不用先点输入框）
   const findProductByBarcode = useCallback(async (barcode: string) => {
+    const code = barcode.trim()
+    const { submitCode, clearCode } = getSettings()
+
+    // 提交码：直接提交出库
+    if (submitCode && code === submitCode) {
+      if (lines.length === 0) {
+        toast.warning('清单为空，无需提交')
+        return
+      }
+      await submitOutboundRef.current()
+      return
+    }
+    // 清空码：清空清单（扫码操作不弹确认框）
+    if (clearCode && code === clearCode) {
+      if (lines.length === 0) return
+      setLines([])
+      setTrackingNo('')
+      setTrackingBound(false)
+      toast.success('已清空出库清单')
+      return
+    }
+
+    // 组合码：匹配组合编码 → 一次性展开加入清单
+    const matchedBundle = bundleList.find((b) => b.code === code)
+    if (matchedBundle) {
+      await expandBundleToLines(matchedBundle)
+      return
+    }
+
     setSearchingBarcode(true)
     try {
-      const p = await resolveProductByCode(barcode)
+      const p = await resolveProductByCode(code)
       if (!p) {
         // 兜底：扫不到产品 → 视为快递单号，自动绑定
         const code = barcode.trim()
@@ -327,7 +407,7 @@ export default function StockOutPage() {
     } finally {
       setSearchingBarcode(false)
     }
-  }, [resolveProductByCode, addProductToLines])
+  }, [resolveProductByCode, addProductToLines, expandBundleToLines, bundleList, lines])
 
   // 快速出库：连续扫即加入清单 1 个
   const quickStockOut = useCallback(async (barcode: string) => {
@@ -377,6 +457,22 @@ export default function StockOutPage() {
       toast.warning('请输入单号')
       return
     }
+    // 提交码/清空码优先处理
+    const { submitCode, clearCode } = getSettings()
+    if (submitCode && val === submitCode) {
+      if (lines.length === 0) { toast.warning('清单为空，无需提交'); return }
+      setTrackingNo('')
+      setTrackingBound(false)
+      submitOutboundRef.current()
+      return
+    }
+    if (clearCode && val === clearCode) {
+      setLines([])
+      setTrackingNo('')
+      setTrackingBound(false)
+      toast.success('已清空出库清单')
+      return
+    }
     const cls = classifyScanCode(val)
     if (cls.type === 'garbage') {
       toast.warning('扫码内容异常，请重扫')
@@ -397,7 +493,7 @@ export default function StockOutPage() {
     checkDuplicateTracking(cls.value).then((date) => {
       if (date) toast.warning(`该单号已于 ${date} 出库过，请注意是否重复`)
     })
-  }, [quickStockOut, checkDuplicateTracking])
+  }, [quickStockOut, checkDuplicateTracking, lines])
 
   // 快速模式：让扫码枪字符不落 input
   useEffect(() => {
@@ -580,6 +676,8 @@ export default function StockOutPage() {
     lines, linesSummary, shipModeValid, shipMode, offlineNote, quickMode, remark,
     trackingBound, trackingNo, user, queryClient, operatorName,
   ])
+  // 更新 ref 供 findProductByBarcode 调用
+  submitOutboundRef.current = submitOutbound
 
   // ============================================================
   // 手动选中产品 → 点「加入清单」按钮
@@ -889,7 +987,7 @@ export default function StockOutPage() {
                       </div>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                       <Button
                         type="button"
                         variant="outline"
@@ -899,11 +997,20 @@ export default function StockOutPage() {
                         <Package className="mr-2 h-4 w-4 text-orange-500" />
                         手动选择产品
                       </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-16 border-dashed hover:bg-indigo-50 hover:border-indigo-400"
+                        onClick={() => setBundlePickerOpen(true)}
+                      >
+                        <Boxes className="mr-2 h-4 w-4 text-indigo-500" />
+                        选组合出库
+                      </Button>
                       <div className="h-16 border-2 border-dashed border-muted rounded-lg flex items-center justify-center text-sm text-muted-foreground bg-muted/30">
                         <ScanLine className="mr-2 h-4 w-4 text-indigo-500" />
                         {searchingBarcode
                           ? '正在查询产品...'
-                          : '扫码枪就绪，直接扫产品条码自动加入清单'}
+                          : '扫码枪就绪，扫产品/组合码自动加入清单'}
                       </div>
                     </div>
                   )}
@@ -1329,6 +1436,71 @@ export default function StockOutPage() {
         onOpenChange={setPickerOpen}
         onSelect={handleManualSelect}
       />
+
+      {/* 组合选择弹窗 */}
+      {bundlePickerOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setBundlePickerOpen(false)}
+        >
+          <div
+            className="bg-background rounded-xl shadow-xl max-w-lg w-full max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="font-bold text-base flex items-center gap-2">
+                <Boxes className="h-5 w-5 text-indigo-600" />
+                选组合出库
+              </h3>
+              <button onClick={() => setBundlePickerOpen(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-4 space-y-2">
+              {bundleList.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground text-sm">
+                  还没有组合，请先到「组合管理」创建
+                </div>
+              ) : (
+                bundleList.map((b) => (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => {
+                      expandBundleToLines(b)
+                      setBundlePickerOpen(false)
+                    }}
+                    className="w-full text-left p-3 rounded-lg border bg-indigo-50/30 hover:bg-indigo-100/50 hover:border-indigo-400 transition"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-sm flex items-center gap-1.5">
+                          <Boxes className="h-4 w-4 text-indigo-600 flex-shrink-0" />
+                          <span className="truncate">{b.name}</span>
+                        </div>
+                        <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
+                          编码：{b.code} · {b.product_bundle_items?.length || 0} 个产品
+                        </div>
+                      </div>
+                      <Plus className="h-4 w-4 text-indigo-500 flex-shrink-0" />
+                    </div>
+                    {/* 产品预览 */}
+                    {b.product_bundle_items && b.product_bundle_items.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {b.product_bundle_items.map((item) => (
+                          <span key={item.product_id} className="text-[10px] bg-white border rounded px-1.5 py-0.5">
+                            {item.product?.name || '未知'} ×{item.quantity}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

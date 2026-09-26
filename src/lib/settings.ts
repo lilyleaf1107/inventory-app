@@ -19,6 +19,8 @@ export interface AppSettings {
   scannerMinLength: number
   scannerMaxInterval: number
   costVisibleRoles: string[] // 可查看成本的角色
+  submitCode: string // 快速出库提交码
+  clearCode: string // 快速出库清空码
 }
 
 // ============ 默认值 ============
@@ -32,6 +34,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   scannerMinLength: 4,
   scannerMaxInterval: 50,
   costVisibleRoles: ['super_admin', 'admin'],
+  submitCode: '',
+  clearCode: '',
 }
 
 // ============ 主题元数据 ============

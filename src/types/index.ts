@@ -104,3 +104,24 @@ export interface ProductTag {
   product_id: string
   tag_id: string
 }
+
+/** 出货组合（预设组合） */
+export interface ProductBundle {
+  id: string
+  name: string
+  code: string
+  remark: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** 组合明细项（关联产品） */
+export interface ProductBundleItem {
+  id: string
+  bundle_id: string
+  product_id: string
+  quantity: number
+  created_at: string
+  /** join 查询时带出的产品信息 */
+  product?: Product
+}
