@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Search, ImagePlus, Check } from 'lucide-react'
 import { supabase, getProductImageUrl } from '@/lib/supabase'
+import { getProductColorClasses } from '@/lib/utils'
 import { useSalesVelocity30d } from '@/hooks/useLowStock'
 import type { Product } from '@/types'
 import { Input } from '@/components/ui/input'
@@ -112,17 +113,17 @@ export default function ProductPicker({ open, onOpenChange, onSelect }: ProductP
             </div>
           ) : (
             <div className="space-y-1 pb-2">
-              {sortedProducts.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setSelectedId(p.id)}
-                  className={`w-full flex items-center gap-3 p-2 rounded-md text-left transition-colors ${
-                    selectedId === p.id
-                      ? 'bg-primary/10 ring-1 ring-primary'
-                      : 'hover:bg-muted'
-                  }`}
-                >
+              {sortedProducts.map((p) => {
+                const colorClasses = getProductColorClasses(p.name)
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setSelectedId(p.id)}
+                    className={`w-full flex items-center gap-3 p-2 rounded-md text-left transition-colors ${
+                      colorClasses || 'hover:bg-muted'
+                    } ${selectedId === p.id ? 'ring-2 ring-primary' : ''}`}
+                  >
                   {p.image_path ? (
                     <img
                       src={getProductImageUrl(p.image_path)}
@@ -145,7 +146,8 @@ export default function ProductPicker({ open, onOpenChange, onSelect }: ProductP
                     <Check className="h-4 w-4 text-primary flex-shrink-0" />
                   )}
                 </button>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>

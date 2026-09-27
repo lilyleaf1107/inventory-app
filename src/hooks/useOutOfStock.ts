@@ -63,7 +63,10 @@ export function useOutOfStock() {
         .order('updated_at', { ascending: false })
 
       if (invError) throw invError
-      const items: OutOfStockItem[] = (zeroInventory || []) as unknown as OutOfStockItem[]
+      // 不记数量的产品（track_qty=false）不从 quantity=0 进缺货列表，
+      // 只有手动设置 manual_status=out_of_stock 才会由下面的逻辑纳入
+      const filtered = (zeroInventory || []).filter((r: any) => r.product?.track_qty !== false)
+      const items = filtered as unknown as OutOfStockItem[]
 
       // 2. 不计数量的产品（track_qty=false）+ manual_status=out_of_stock → 也算缺货
       if (cols.track_qty && cols.manual_status) {
@@ -154,16 +157,17 @@ export function useOutOfStock() {
 }
 
 // 轻量版：仅返回缺货数量（首页用，不拉完整数据）
+// 注意：不记数量的产品（track_qty=false）不计入，除非手动标缺货（由 useOutOfStock 处理）
 export function useOutOfStockCount() {
   return useQuery({
     queryKey: ['out-of-stock-count'],
     queryFn: async () => {
-      const { count, error } = await supabase
+      const { data, error } = await supabase
         .from('inventory')
-        .select('*', { count: 'exact', head: true })
+        .select('product:products(track_qty)')
         .eq('quantity', 0)
       if (error) throw error
-      return count || 0
+      return (data || []).filter((r: any) => r.product?.track_qty !== false).length
     },
     staleTime: 1000 * 60 * 2,
   })

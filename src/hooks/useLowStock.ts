@@ -43,7 +43,7 @@ export const LOW_STOCK_THRESHOLD_CRITICAL = 5
 export const DAYS_THRESHOLD_WARNING = 15
 export const DAYS_THRESHOLD_DANGER = 7
 export const DAYS_THRESHOLD_CRITICAL = 3
-export const OUT_30_DAYS_WINDOW = 30
+export const OUT_30_DAYS_WINDOW = 60
 
 function getThresholds() {
   const s = getSettings()
@@ -226,6 +226,9 @@ export function useLowStock() {
         const qty = Number(row.quantity) || 0
         const out30 = vMap.get(prod.id) || 0
 
+        // 不记数量的产品：只有手动设置了 low_stock/out_of_stock 才进预警列表
+        if (!trackQty && !prod.manual_status) continue
+
         let level: LowStockLevel
         if (!trackQty && prod.manual_status) {
           // 不计数量 + 手动状态 → 用手动状态覆盖
@@ -327,6 +330,8 @@ export function useLowStockCountLight() {
       for (const r of (rows || []) as any[]) {
         const prod = r.product || {}
         const trackQty = prod.track_qty !== false
+        // 不记数量的产品：只有手动设置了 low_stock/out_of_stock 才计数
+        if (!trackQty && !prod.manual_status) continue
         if (!trackQty && prod.manual_status) {
           const l = mapManualStatus(prod.manual_status)
           if (l !== 'normal') { total++; continue }

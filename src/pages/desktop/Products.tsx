@@ -104,6 +104,8 @@ export default function ProductsPage() {
   const [inlineLocProductId, setInlineLocProductId] = useState<string | null>(null)
   const [inlineLocId, setInlineLocId] = useState('')
   const [inlineLocQty, setInlineLocQty] = useState('')
+  // 空缺 SKU 弹窗
+  const [vacantOpen, setVacantOpen] = useState(false)
 
   // 🛡 探测 products 新列是否存在（兼容未执行 0018 迁移的环境）
   const { data: productCols } = useQuery({
@@ -252,6 +254,36 @@ export default function ProductsPage() {
     },
   })
 
+  // 所有产品 SKU（用于计算空缺号）
+  const { data: allSkus = [] } = useQuery({
+    queryKey: ['all-product-skus'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('products')
+        .select('sku')
+        .not('sku', 'is', null)
+      if (error) throw error
+      return (data || []).map((r: any) => r.sku as string).filter(Boolean)
+    },
+    staleTime: 1000 * 60 * 5,
+  })
+
+  // 计算空缺 SKU：解析4位数字，找最大号，列出 1~最大号 中未使用的
+  const vacantSkus = useMemo(() => {
+    const used = new Set<number>()
+    for (const s of allSkus) {
+      const n = parseInt(s, 10)
+      if (!isNaN(n) && n > 0) used.add(n)
+    }
+    if (used.size === 0) return [] as string[]
+    const max = Math.max(...used)
+    const result: string[] = []
+    for (let i = 1; i <= max; i++) {
+      if (!used.has(i)) result.push(String(i).padStart(4, '0'))
+    }
+    return result
+  }, [allSkus])
+
   const createMutation = useMutation({
     mutationFn: async (form: ProductForm) => {
       let imagePath = null
@@ -302,6 +334,7 @@ export default function ProductsPage() {
       queryClient.invalidateQueries({ queryKey: ['products'] })
       queryClient.invalidateQueries({ queryKey: ['products-qty-map'] })
       queryClient.invalidateQueries({ queryKey: ['products-locations-map'] })
+      queryClient.invalidateQueries({ queryKey: ['all-product-skus'] })
       setDialogOpen(false)
       setEditingProductId(null)
       setCreateLocId('')
@@ -462,6 +495,7 @@ export default function ProductsPage() {
       queryClient.invalidateQueries({ queryKey: ['products'] })
       queryClient.invalidateQueries({ queryKey: ['products-qty-map'] })
       queryClient.invalidateQueries({ queryKey: ['products-locations-map'] })
+      queryClient.invalidateQueries({ queryKey: ['all-product-skus'] })
     },
     onError: (err: any) => toast.error(err.message || '删除失败'),
   })
@@ -952,12 +986,18 @@ export default function ProductsPage() {
             <h2 className="text-2xl font-bold tracking-tight">产品管理</h2>
             <p className="text-sm text-muted-foreground">管理所有产品信息和图片</p>
           </div>
-          {canWrite() && (
-            <Button onClick={openCreate}>
-              <Plus className="mr-2 h-4 w-4" />
-              新增产品
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => setVacantOpen(true)}>
+              <Package className="mr-2 h-4 w-4" />
+              当前空位
             </Button>
-          )}
+            {canWrite() && (
+              <Button onClick={openCreate}>
+                <Plus className="mr-2 h-4 w-4" />
+                新增产品
+              </Button>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
@@ -1707,6 +1747,49 @@ comment on column public.stock_moves.operator_name is '实际出库/入库人姓
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* 空缺 SKU 弹窗 */}
+      <Dialog open={vacantOpen} onOpenChange={setVacantOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Package className="h-5 w-5 text-indigo-600" />
+              当前空位（SKU）
+            </DialogTitle>
+            <DialogDescription>
+              以下 SKU 号在 1 ~ {allSkus.length > 0 ? Math.max(...allSkus.map((s) => parseInt(s, 10)).filter((n) => !isNaN(n) && n > 0)) : 0} 之间未被使用
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            {vacantSkus.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                🎉 没有空缺 SKU，所有号位都已使用
+              </div>
+            ) : (
+              <div className="max-h-80 overflow-y-auto">
+                <div className="text-sm text-muted-foreground mb-2">
+                  共 <span className="font-bold text-indigo-600">{vacantSkus.length}</span> 个空位：
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {vacantSkus.map((s) => (
+                    <span
+                      key={s}
+                      className="px-2.5 py-1 rounded-md bg-indigo-50 text-indigo-700 text-sm font-mono border border-indigo-100"
+                    >
+                      {s}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setVacantOpen(false)}>
+              关闭
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
