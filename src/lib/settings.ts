@@ -21,6 +21,7 @@ export interface AppSettings {
   costVisibleRoles: string[] // 可查看成本的角色
   submitCode: string // 快速出库提交码
   clearCode: string // 快速出库清空码
+  outboundStaff: string[] // 出库人快捷名单（5个）
 }
 
 // ============ 默认值 ============
@@ -36,6 +37,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   costVisibleRoles: ['super_admin', 'admin'],
   submitCode: '',
   clearCode: '',
+  outboundStaff: ['', '', '', '', '', ''],
 }
 
 // ============ 主题元数据 ============
@@ -69,6 +71,9 @@ export function getSettings(): AppSettings {
     if (!(['lightgreen', 'ricewhite', 'softpurple', 'lightred', 'softblue'] as const).includes(next.theme)) {
       next.theme = DEFAULT_SETTINGS.theme
     }
+    // 出库人名单补齐到6个（老用户可能只有5个）
+    if (!Array.isArray(next.outboundStaff)) next.outboundStaff = [...DEFAULT_SETTINGS.outboundStaff]
+    while (next.outboundStaff.length < 6) next.outboundStaff.push('')
     return next
   } catch {
     return DEFAULT_SETTINGS

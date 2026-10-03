@@ -48,7 +48,7 @@ const navItems: NavItem[] = [
   { to: '/inventory', label: '库存查询', icon: Search },
   { to: '/out-of-stock', label: '缺货提醒', icon: AlertTriangle },
   { to: '/low-stock', label: '低库存预警', icon: Gauge },
-  { to: '/moves', label: '进出库记录', icon: List, requireWrite: true },
+  { to: '/moves', label: '进出库管理', icon: List, requireWrite: true },
 ]
 
 const adminItems: NavItem[] = [

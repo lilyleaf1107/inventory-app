@@ -14,6 +14,7 @@ import {
   Download,
   RotateCcw,
   RotateCw,
+  Users,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import {
@@ -323,6 +324,36 @@ export default function MobileSettings() {
           </div>
         </CardContent>
       </Card>
+
+      {/* 出库人快捷名单 */}
+      {canManageUsers() && (
+        <Card>
+          <CardContent className="p-4 space-y-3">
+            <div className="font-medium text-sm flex items-center gap-1.5">
+              <Users className="h-4 w-4" />
+              出库人快捷名单
+            </div>
+            <p className="text-[10px] text-muted-foreground">设置 6 个常用出库人，出库页一键点选（留空为灰色占位）</p>
+            <div className="grid grid-cols-2 gap-2">
+              {settings.outboundStaff.map((name, i) => (
+                <div className="space-y-1" key={i}>
+                  <Label className="text-[10px] text-muted-foreground">出库人 {i + 1}</Label>
+                  <Input
+                    value={name}
+                    onChange={(e) => {
+                      const next = [...settings.outboundStaff]
+                      next[i] = e.target.value
+                      update({ outboundStaff: next })
+                    }}
+                    placeholder={`名字 ${i + 1}`}
+                    className="h-9 text-sm"
+                  />
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* 成本权限 */}
       {canManageUsers() && (

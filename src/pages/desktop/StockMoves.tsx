@@ -16,6 +16,7 @@ import {
   Pencil,
   X,
   Check,
+  Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
@@ -39,7 +40,7 @@ type StockMoveRow = {
   is_offline: boolean | null
   operator_name: string | null
   created_at: string
-  product: { id: string; name: string; sku: string | null; unit: string }
+  product: { id: string; name: string; sku: string | null; unit: string; track_qty: boolean | null }
   location: {
     id: string
     code: string
@@ -90,22 +91,32 @@ const GROUP_PAGE_SIZE = 15 // 每页显示多少组（一组=一个快递单/一
 export default function StockMovesPage() {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
   const [typeFilter, setTypeFilter] = useState<'all' | 'in' | 'out'>('all')
   const [shipModeFilter, setShipModeFilter] = useState<'all' | 'online' | 'offline'>('all')
-  const [trackingSearch, setTrackingSearch] = useState('')
   const [expanded, setExpanded] = useState<Record<GroupKey, boolean> | 'all-on' | 'all-off'>('all-on')
   const [copyToast, setCopyToast] = useState<string>('')
   const [page, setPage] = useState(1)
 
-  // 组级编辑：改备注 / 补单号 / 切线上线下
+  // 组级编辑：改备注 / 补单号 / 切换线上线下
   const [editingGroup, setEditingGroup] = useState<MoveGroup | null>(null)
   const [editShipMode, setEditShipMode] = useState<'online' | 'offline' | 'other'>('other')
   const [editTrackingNo, setEditTrackingNo] = useState('')
   const [editRemark, setEditRemark] = useState('')
   const [savingEdit, setSavingEdit] = useState(false)
 
+  // 单条明细编辑/删除（改数量/备注/批次，联动库存）
+  const [editingMove, setEditingMove] = useState<StockMoveRow | null>(null)
+  const [editMoveQty, setEditMoveQty] = useState('')
+  const [editMoveRemark, setEditMoveRemark] = useState('')
+  const [editMoveBatch, setEditMoveBatch] = useState('')
+  const [savingMove, setSavingMove] = useState(false)
+  const [deletingMove, setDeletingMove] = useState<StockMoveRow | null>(null)
+  const [deletingMoveLoading, setDeletingMoveLoad] = useState(false)
+
   const { data: moves, isLoading, error, refetch } = useQuery({
-    queryKey: ['stock-moves-v2', typeFilter, shipModeFilter, trackingSearch],
+    queryKey: ['stock-moves-v2', typeFilter, shipModeFilter, search, startDate, endDate],
     queryFn: async () => {
       // 直接查询 tracking_no / is_offline / operator_name（0017/0018 迁移已执行完毕）
       let qb = supabase
@@ -113,13 +124,16 @@ export default function StockMovesPage() {
         .select(`
           id, move_type, quantity, scan_mode, batch_no, remark, created_at,
           tracking_no, is_offline, operator_name,
-          product:products(id, name, sku, unit),
+          product:products(id, name, sku, unit, track_qty),
           location:locations(id, code, warehouse:warehouses(id, code, name)),
           operator:profiles!stock_moves_operator_id_fkey(id, name)
         `)
         .order('created_at', { ascending: false })
-        .limit(500) as any
+        .limit(5000) as any
       if (typeFilter !== 'all') qb = qb.eq('move_type', typeFilter)
+      // 日期范围筛选：startDate 起（含当天 00:00），endDate 止（含当天 23:59:59）
+      if (startDate) qb = qb.gte('created_at', `${startDate}T00:00:00.000`)
+      if (endDate) qb = qb.lte('created_at', `${endDate}T23:59:59.999`)
       const { data, error: err } = await qb
       if (err) throw err
       const rows = (data || []) as StockMoveRow[]
@@ -131,7 +145,6 @@ export default function StockMovesPage() {
         const ship = moveShipLabel(r)
         if (shipModeFilter === 'online' && ship.type !== 'online') return false
         if (shipModeFilter === 'offline' && ship.type !== 'offline') return false
-        if (trackingSearch && !ship.ref.toLowerCase().includes(trackingSearch.toLowerCase())) return false
         if (s) {
           const hit =
             r.product.name.toLowerCase().includes(s) ||
@@ -250,14 +263,16 @@ export default function StockMovesPage() {
     }
   }, [moves])
 
-  // 搜索分组后的筛选（内容搜索只过滤组，不分页总数）
+  // 搜索分组后的筛选（内容搜索只过滤组，不分页总数）—— 字段必须和 queryFn 保持一致，否则会把单号匹配到的组误删
   const visibleGroups = useMemo(() => {
     if (!search.trim()) return groups
     const kw = search.trim().toLowerCase()
     return groups.filter((g) => g.items.some((m) => {
+      const ship = moveShipLabel(m)
       if (m.product.name?.toLowerCase().includes(kw)) return true
       if (m.product.sku?.toLowerCase().includes(kw)) return true
       if (m.batch_no?.toLowerCase().includes(kw)) return true
+      if (ship.ref?.toLowerCase().includes(kw)) return true
       if (m.remark?.toLowerCase().includes(kw)) return true
       return false
     }))
@@ -267,7 +282,7 @@ export default function StockMovesPage() {
   const totalPages = Math.max(1, Math.ceil(totalGroups / GROUP_PAGE_SIZE))
 
   // 筛选条件变化 → 回第 1 页
-  useMemo(() => { setPage(1) }, [totalGroups, typeFilter, shipModeFilter, trackingSearch])
+  useMemo(() => { setPage(1) }, [totalGroups, typeFilter, shipModeFilter, search])
 
   // 分页 slice（按组切）
   const pagedGroups = useMemo(
@@ -305,7 +320,7 @@ export default function StockMovesPage() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `进出库记录_${new Date().toISOString().slice(0, 10)}.csv`
+    a.download = `进出库管理_${new Date().toISOString().slice(0, 10)}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -316,6 +331,81 @@ export default function StockMovesPage() {
       setCopyToast(`已复制${tag}: ${text}`)
       setTimeout(() => setCopyToast(''), 2200)
     } catch { /* ignore */ }
+  }
+
+  // 单条明细编辑：保存数量/备注/批次，联动 inventory
+  const openEditMove = (m: StockMoveRow) => {
+    setEditingMove(m)
+    setEditMoveQty(String(m.quantity))
+    setEditMoveRemark(m.remark || '')
+    setEditMoveBatch(m.batch_no || '')
+  }
+  const saveEditMove = async () => {
+    const m = editingMove
+    if (!m) return
+    const newQty = parseInt(editMoveQty, 10)
+    if (!newQty || newQty <= 0) { toast.error('数量必须为正整数'); return }
+    if (newQty === m.quantity && (editMoveRemark || null) === m.remark && (editMoveBatch || null) === m.batch_no) {
+      toast('未做修改')
+      setEditingMove(null); return
+    }
+    setSavingMove(true)
+    try {
+      const patch: Record<string, any> = { quantity: newQty, remark: editMoveRemark.trim() || null, batch_no: editMoveBatch.trim() || null }
+      const { error } = await supabase.from('stock_moves').update(patch).eq('id', m.id)
+      if (error) throw error
+      // 联动 inventory：track_qty !== false 才调整
+      if (m.product.track_qty !== false) {
+        const diff = newQty - m.quantity
+        if (diff !== 0) {
+          const sign = m.move_type === 'out' ? -1 : 1 // 出库多扣→库存减；入库多加→库存加
+          const { data: inv } = await supabase.from('inventory').select('id, quantity').eq('product_id', m.product.id).eq('location_id', m.location.id).maybeSingle()
+          if (inv && inv.id) {
+            const newInv = Number(inv.quantity) + sign * diff
+            await supabase.from('inventory').update({ quantity: newInv, updated_at: new Date().toISOString() }).eq('id', inv.id)
+          }
+        }
+      }
+      toast.success('✅ 已修改')
+      setEditingMove(null)
+      await queryClient.invalidateQueries({ queryKey: ['stock-moves-v2'] })
+      await queryClient.invalidateQueries({ queryKey: ['inventory'] })
+      await queryClient.invalidateQueries({ queryKey: ['product-inventory'] })
+    } catch (e: any) {
+      console.error('[修改明细失败]', e)
+      toast.error(e?.message || '保存失败')
+    } finally {
+      setSavingMove(false)
+    }
+  }
+  const deleteMove = async () => {
+    const m = deletingMove
+    if (!m) return
+    setDeletingMoveLoad(true)
+    try {
+      const { error } = await supabase.from('stock_moves').delete().eq('id', m.id)
+      if (error) throw error
+      // 联动 inventory：track_qty !== false 才加回/扣掉
+      if (m.product.track_qty !== false) {
+        // 出库删掉 → 库存加回；入库删掉 → 库存扣掉
+        const sign = m.move_type === 'out' ? 1 : -1
+        const { data: inv } = await supabase.from('inventory').select('id, quantity').eq('product_id', m.product.id).eq('location_id', m.location.id).maybeSingle()
+        if (inv && inv.id) {
+          const newInv = Number(inv.quantity) + sign * m.quantity
+          await supabase.from('inventory').update({ quantity: newInv, updated_at: new Date().toISOString() }).eq('id', inv.id)
+        }
+      }
+      toast.success('✅ 已删除该条明细')
+      setDeletingMove(null)
+      await queryClient.invalidateQueries({ queryKey: ['stock-moves-v2'] })
+      await queryClient.invalidateQueries({ queryKey: ['inventory'] })
+      await queryClient.invalidateQueries({ queryKey: ['product-inventory'] })
+    } catch (e: any) {
+      console.error('[删除明细失败]', e)
+      toast.error(e?.message || '删除失败')
+    } finally {
+      setDeletingMoveLoad(false)
+    }
   }
 
   const toggleExpand = (k: GroupKey) => {
@@ -353,7 +443,7 @@ export default function StockMovesPage() {
             按单号 / 客户 / 批次 · 聚合展示
           </div>
           <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <FileText className="h-6 w-6 text-indigo-600" /> 进出库记录
+            <FileText className="h-6 w-6 text-indigo-600" /> 进出库管理
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
             同一单号下的多产品出库自动合并成 1 组 · 线上快递、线下交易、入库批次分开展示
@@ -409,7 +499,7 @@ export default function StockMovesPage() {
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 min-w-[200px] max-w-md">
           <Filter className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="搜索产品 / SKU / 批次 / 备注 / 客户" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8" />
+          <Input placeholder="搜索产品 / SKU / 批次 / 备注 / 单号 / 客户" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8" />
         </div>
         <div className="flex items-center gap-1 p-1 bg-muted rounded-md">
           {(['all', 'in', 'out'] as const).map((t) => (
@@ -446,9 +536,16 @@ export default function StockMovesPage() {
             </button>
           ))}
         </div>
-        <div className="relative min-w-[220px]">
-          <Truck className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="搜索单号 / 线下客户名" value={trackingSearch} onChange={(e) => setTrackingSearch(e.target.value)} className="pl-8" />
+        {/* 日期范围筛选 */}
+        <div className="flex items-center gap-1.5">
+          <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-[150px] text-xs" title="开始日期" />
+          <span className="text-muted-foreground text-xs">—</span>
+          <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-[150px] text-xs" title="结束日期" />
+          {(startDate || endDate) && (
+            <Button variant="ghost" size="sm" onClick={() => { setStartDate(''); setEndDate('') }} title="清除日期筛选">
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          )}
         </div>
         <div className="flex items-center gap-1.5 ml-auto">
           <Button variant="ghost" size="sm" onClick={expandAll} disabled={!groups.length}>全部展开</Button>
@@ -471,7 +568,7 @@ export default function StockMovesPage() {
         ) : visibleGroups.length === 0 ? (
           <Card><CardContent className="py-16 text-center text-muted-foreground">
             <FileText className="h-12 w-12 mx-auto mb-3 opacity-20" />
-            <div className="font-medium">暂无符合条件的进出库记录</div>
+            <div className="font-medium">暂无符合条件的进出库管理记录</div>
             <div className="text-xs mt-1 opacity-80">试着调整筛选条件或导出操作</div>
           </CardContent></Card>
         ) : (
@@ -612,6 +709,7 @@ export default function StockMovesPage() {
                             <th className="px-4 py-2 text-left text-[11px] font-bold text-slate-600 uppercase tracking-wide w-20">方式</th>
                             <th className="px-4 py-2 text-left text-[11px] font-bold text-slate-600 uppercase tracking-wide w-40">时间</th>
                             <th className="px-4 py-2 text-left text-[11px] font-bold text-slate-600 uppercase tracking-wide">备注</th>
+                            <th className="px-4 py-2 text-center text-[11px] font-bold text-slate-600 uppercase tracking-wide w-28">操作</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -664,6 +762,25 @@ export default function StockMovesPage() {
                                 {m.remark ? (
                                   <div className="whitespace-pre-wrap break-words truncate" title={m.remark}>{m.remark}</div>
                                 ) : <span className="text-muted-foreground/60">—</span>}
+                              </td>
+                              {/* 操作：编辑 / 删除（纯图标大按钮，和组级编辑按钮风格统一） */}
+                              <td className="px-4 py-2 text-center whitespace-nowrap">
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); openEditMove(m) }}
+                                  className="inline-flex items-center justify-center h-9 w-9 rounded-lg text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-colors"
+                                  title="编辑数量/备注/批次"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); setDeletingMove(m) }}
+                                  className="ml-1.5 inline-flex items-center justify-center h-9 w-9 rounded-lg text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 transition-colors"
+                                  title="删除该条流水（同步调整库存）"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
                               </td>
                             </tr>
                           ))}
@@ -781,6 +898,91 @@ export default function StockMovesPage() {
             }
           }}>
             <Check className="h-4 w-4 mr-1" /> {savingEdit ? '保存中...' : '保存'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    {/* 单条明细编辑：改数量/备注/批次 */}
+    <Dialog open={!!editingMove} onOpenChange={(o) => !o && setEditingMove(null)}>
+      <DialogContent className="sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Pencil className="h-5 w-5 text-indigo-600" />
+            编辑明细
+            <span className="text-xs font-normal text-muted-foreground ml-1">
+              {editingMove?.product.name} · {editingMove?.move_type === 'out' ? '出库' : '入库'}
+            </span>
+          </DialogTitle>
+        </DialogHeader>
+        {editingMove && (
+          <div className="space-y-3">
+            <div className="text-xs text-muted-foreground bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              ⚠️ 改数量会自动同步调整该产品在 <span className="font-mono">{editingMove.location.warehouse.name || editingMove.location.warehouse.code} / 位 {editingMove.location.code}</span> 的库存。
+              {editingMove.product.track_qty === false && <span className="text-amber-700 font-semibold"> 该产品不记数量，不联动库存。</span>}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit_move_qty">数量 <span className="text-xs text-muted-foreground">（正整数，单位：{editingMove.product.unit}）</span></Label>
+              <Input id="edit_move_qty" type="number" min={1} value={editMoveQty} onChange={(e) => setEditMoveQty(e.target.value)} className="h-10" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit_move_batch">批次号 <span className="text-xs text-muted-foreground">（可选）</span></Label>
+              <Input id="edit_move_batch" value={editMoveBatch} onChange={(e) => setEditMoveBatch(e.target.value)} placeholder="例如：BN20260101" className="h-10" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit_move_remark">备注 <span className="text-xs text-muted-foreground">（可选，会覆盖原备注）</span></Label>
+              <Textarea id="edit_move_remark" value={editMoveRemark} onChange={(e) => setEditMoveRemark(e.target.value)} rows={3} placeholder="例如：客户自提 / 补录" />
+            </div>
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => setEditingMove(null)} disabled={savingMove}>
+            <X className="h-4 w-4 mr-1" /> 取消
+          </Button>
+          <Button disabled={savingMove} onClick={saveEditMove}>
+            <Check className="h-4 w-4 mr-1" /> {savingMove ? '保存中...' : '保存'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    {/* 单条明细删除确认 */}
+    <Dialog open={!!deletingMove} onOpenChange={(o) => !o && setDeletingMove(null)}>
+      <DialogContent className="sm:max-w-[460px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-red-700">
+            <Trash2 className="h-5 w-5" />
+            确认删除该条流水？
+          </DialogTitle>
+        </DialogHeader>
+        {deletingMove && (
+          <div className="space-y-3">
+            <div className="text-sm">
+              产品：<span className="font-bold">{deletingMove.product.name}</span>
+              <span className="text-muted-foreground font-mono ml-2">SKU: {deletingMove.product.sku || '—'}</span>
+            </div>
+            <div className="text-sm">
+              数量：<span className={cn('font-black tabular-nums', deletingMove.move_type === 'out' ? 'text-orange-700' : 'text-green-700')}>
+                {deletingMove.move_type === 'out' ? '-' : '+'}{deletingMove.quantity}
+              </span>
+              <span className="text-muted-foreground ml-1">{deletingMove.product.unit}</span>
+              <span className="ml-2 text-xs text-muted-foreground">({deletingMove.move_type === 'out' ? '出库' : '入库'})</span>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              库位：<span className="font-mono">{deletingMove.location.warehouse.name || deletingMove.location.warehouse.code} / 位 {deletingMove.location.code}</span>
+            </div>
+            <div className="text-xs bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-red-800">
+              ⚠️ 删除后{deletingMove.move_type === 'out' ? '会把数量加回库存' : '会把数量从库存扣掉'}，操作不可撤销。
+              {deletingMove.product.track_qty === false && <span className="font-semibold"> 该产品不记数量，不联动库存。</span>}
+            </div>
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => setDeletingMove(null)} disabled={deletingMoveLoading}>
+            <X className="h-4 w-4 mr-1" /> 取消
+          </Button>
+          <Button variant="destructive" disabled={deletingMoveLoading} onClick={deleteMove}>
+            <Trash2 className="h-4 w-4 mr-1" /> {deletingMoveLoading ? '删除中...' : '确认删除'}
           </Button>
         </DialogFooter>
       </DialogContent>

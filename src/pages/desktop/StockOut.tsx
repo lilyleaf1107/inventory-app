@@ -20,6 +20,7 @@ import {
   ClipboardList,
   RefreshCcw,
   Tag,
+  Send,
   Boxes,
 } from 'lucide-react'
 import { supabase, getProductImageUrl } from '@/lib/supabase'
@@ -71,22 +72,12 @@ export default function StockOutPage() {
   const trackingInputRef = useRef<HTMLInputElement>(null)
   const bindTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // 重复出库警告：顶部居中大红色横幅（toast 在右上角太不起眼）
+  const [dupWarning, setDupWarning] = useState<{ no: string; date: string } | null>(null)
+  const dupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   // ========== 出库人（同一账号可能对应多出库人） ==========
   const [operatorName, setOperatorName] = useState('')
-  const { data: profileList = [] } = useQuery({
-    queryKey: ['profiles-drop-stockout'],
-    staleTime: 5 * 60 * 1000,
-    queryFn: async () => {
-      const { data, error } = await supabase.from('profiles').select('id, name')
-      if (error) throw error
-      return (data || []).filter((x: any) => !!x?.name) as { id: string; name: string }[]
-    },
-  })
-  const operatorListOptions = useMemo(() => {
-    const base = profileList.map((p) => p.name)
-    if (operatorName && !base.includes(operatorName)) base.unshift(operatorName)
-    return Array.from(new Set(base)).filter(Boolean)
-  }, [profileList, operatorName])
 
   // 在线模式且未绑定时，自动聚焦单号输入框，确保扫码枪内容直接进框
   useEffect(() => {
@@ -420,7 +411,7 @@ export default function StockOutPage() {
     }
   }, [findProductByBarcode])
 
-  // 判断扫码内容：乱码 / 产品码(4位纯数字) / 单号
+  // 判断扫码内容：乱码 / 产品码(4位纯数字) / 单号(≥10位字母数字)
   const classifyScanCode = (raw: string): { type: 'garbage' | 'product' | 'tracking'; value: string } => {
     const v = raw.trim()
     if (!v) return { type: 'garbage', value: v }
@@ -428,8 +419,10 @@ export default function StockOutPage() {
     if (!/^[A-Za-z0-9]+$/.test(v)) return { type: 'garbage', value: v }
     // 4位纯数字 → 产品码
     if (v.length === 4 && /^\d+$/.test(v)) return { type: 'product', value: v }
-    // 其余一律视为单号
-    return { type: 'tracking', value: v }
+    // 快递单号：≥10位的字母数字组合（参考常见快递13-15位）
+    if (v.length >= 10) return { type: 'tracking', value: v }
+    // 其他长度 → 异常
+    return { type: 'garbage', value: v }
   }
 
   // 检查最近7天是否已有相同单号出库
@@ -475,7 +468,8 @@ export default function StockOutPage() {
     }
     const cls = classifyScanCode(val)
     if (cls.type === 'garbage') {
-      toast.warning('扫码内容异常，请重扫')
+      // 输入框已过滤非字母数字，走到这里基本是长度不足
+      toast.warning('单号长度不足（快递单号需≥10位，产品码为4位纯数字）')
       return
     }
     if (cls.type === 'product') {
@@ -491,7 +485,11 @@ export default function StockOutPage() {
     document.body.focus()
     toast.success(`✅ 已绑定单号：${cls.value}`)
     checkDuplicateTracking(cls.value).then((date) => {
-      if (date) toast.warning(`该单号已于 ${date} 出库过，请注意是否重复`)
+      if (!date) return
+      // 顶部居中大红色横幅，停留 6 秒
+      setDupWarning({ no: cls.value, date })
+      if (dupTimerRef.current) clearTimeout(dupTimerRef.current)
+      dupTimerRef.current = setTimeout(() => setDupWarning(null), 10000)
     })
   }, [quickStockOut, checkDuplicateTracking, lines])
 
@@ -606,7 +604,9 @@ export default function StockOutPage() {
       quickMode ? '快速出库模式' : '',
       remark.trim(),
     ].filter(Boolean).join(' · ')
-    const finalTrackingNo = shipMode === 'online' && trackingBound ? trackingNo.trim() || null : null
+    // 只有确认是单号格式（字母数字且≥10位，参考常见快递：极兔/中通/韵达/邮政/圆通/德邦/申通均为13-15位）才保存
+    const trackingValid = shipMode === 'online' && /^[A-Za-z0-9]{10,}$/.test(trackingNo.trim())
+    const finalTrackingNo = trackingValid ? trackingNo.trim() : null
     const finalIsOffline = shipMode === 'offline'
 
     const finalOperatorName = operatorName.trim() || null
@@ -736,6 +736,42 @@ export default function StockOutPage() {
   // ============================================================
   return (
     <div className="space-y-5">
+      {/* 重复出库警告：超大醒目横幅，黄边红底 + 闪烁，停留 10 秒（库管眼神不好反应慢） */}
+      {dupWarning && (
+        <div
+          className="fixed top-6 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-4 px-8 py-6 rounded-3xl bg-red-600 text-white shadow-2xl border-[6px] border-yellow-300 max-w-[95vw] animate-in fade-in slide-in-from-top-4"
+          role="alert"
+          style={{ animation: 'dupBlink 0.8s ease-in-out infinite' }}
+        >
+          <AlertTriangle className="h-14 w-14 flex-shrink-0 text-yellow-300" />
+          <div className="text-left">
+            <div className="text-3xl font-black leading-tight tracking-wide">⚠️ 该单号重复出库！</div>
+            <div className="text-lg font-bold text-yellow-100 mt-1">
+              单号 <span className="font-mono font-black text-2xl text-white bg-red-800 px-2 py-0.5 rounded">{dupWarning.no}</span>
+            </div>
+            <div className="text-base font-semibold text-red-50 mt-1">
+              已于 {dupWarning.date} 出库过，请确认是否重复出库！
+            </div>
+          </div>
+          <button
+            type="button"
+            className="ml-3 p-2.5 rounded-xl hover:bg-red-700 transition-colors flex-shrink-0"
+            onClick={() => {
+              if (dupTimerRef.current) clearTimeout(dupTimerRef.current)
+              setDupWarning(null)
+            }}
+            aria-label="关闭"
+          >
+            <X className="h-7 w-7" />
+          </button>
+        </div>
+      )}
+      <style>{`
+        @keyframes dupBlink {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(250, 204, 21, 0.7), 0 25px 50px -12px rgba(0,0,0,0.5); }
+          50% { box-shadow: 0 0 0 16px rgba(250, 204, 21, 0), 0 25px 50px -12px rgba(0,0,0,0.5); }
+        }
+      `}</style>
       {/* 顶部标题 */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -809,115 +845,134 @@ export default function StockOutPage() {
             </button>
           </div>
 
-          {shipMode === 'online' ? (
-            <div className="space-y-2">
-              <Label htmlFor="tracking_no" className="text-sm font-medium">
-                快递单号（扫码枪扫入，输完自动绑定）
-              </Label>
-              <div className="flex gap-2">
-                <Input
-                  id="tracking_no"
-                  ref={trackingInputRef}
-                  value={trackingNo}
-                  onChange={(e) => {
-                    setTrackingNo(e.target.value)
-                    setTrackingBound(false)
-                    // 停顿200ms自动绑定：扫码枪字符间隔<50ms，连续输完后停顿触发
-                    // 人手输入每字符间隔>200ms，不会误触发（需手动点绑定或按回车）
-                    if (bindTimerRef.current) clearTimeout(bindTimerRef.current)
-                    bindTimerRef.current = setTimeout(() => {
-                      if (e.target.value.trim()) {
-                        handleTrackingBind(e.target.value)
-                      }
-                    }, 200)
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
+          {/* 单号 + 出库人 两列布局 */}
+          <div className="grid grid-cols-2 gap-4">
+            {/* 左列：快递单号 / 客户名 */}
+            <div className="flex flex-col gap-2">
+              {shipMode === 'online' ? (
+                <>
+                  <Label htmlFor="tracking_no" className="text-sm font-medium">
+                    快递单号（扫码枪扫入，输完自动绑定）
+                  </Label>
+                  <Input
+                    id="tracking_no"
+                    ref={trackingInputRef}
+                    value={trackingNo}
+                    onChange={(e) => {
+                      const cleaned = e.target.value.replace(/[^A-Za-z0-9]/g, '')
+                      setTrackingNo(cleaned)
+                      setTrackingBound(false)
                       if (bindTimerRef.current) clearTimeout(bindTimerRef.current)
-                      handleTrackingBind(e.currentTarget.value)
-                    }
-                  }}
-                  placeholder="例如：SF1234567890，输完自动绑定"
-                  className={`h-11 ${trackingBound ? 'border-green-500 bg-green-50 focus:border-green-500' : ''}`}
-                />
-                {trackingBound ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => { setTrackingBound(false); setTrackingNo('') }}
-                  >
-                    <X className="h-4 w-4 mr-1" /> 清除
-                  </Button>
-                ) : (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      if (!trackingNo.trim()) return toast.warning('请输入单号')
-                      setTrackingBound(true)
-                      trackingInputRef.current?.blur()
-                      document.body.focus()
-                      toast.success(`✅ 已绑定单号：${trackingNo.trim()}`)
+                      bindTimerRef.current = setTimeout(() => {
+                        if (cleaned.trim()) handleTrackingBind(cleaned)
+                      }, 200)
                     }}
-                  >
-                    <Check className="h-4 w-4 mr-1" /> 绑定
-                  </Button>
-                )}
-              </div>
-              {trackingBound ? (
-                <div className="flex items-center gap-2 text-sm text-green-800 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-                  <Check className="h-4 w-4 text-green-600 flex-shrink-0" />
-                  <span>已绑定单号：</span>
-                  <span className="font-mono font-bold tracking-wide">{trackingNo.trim()}</span>
-                  <span className="text-green-600/80 text-xs ml-auto">本单所有产品将自动带上此单号</span>
-                </div>
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        if (bindTimerRef.current) clearTimeout(bindTimerRef.current)
+                        handleTrackingBind(e.currentTarget.value)
+                      }
+                    }}
+                    placeholder="扫/输快递单号"
+                    className={`h-11 text-base font-mono tracking-wide ${trackingBound ? 'border-green-500 bg-green-50 focus:border-green-500' : ''}`}
+                  />
+                  <div className="flex gap-2 flex-1">
+                    <Button
+                      type="button"
+                      variant="default"
+                      className="px-5 text-sm flex-1 h-full"
+                      onClick={() => {
+                        if (bindTimerRef.current) clearTimeout(bindTimerRef.current)
+                        handleTrackingBind(trackingNo)
+                      }}
+                    >
+                      <Check className="h-4 w-4 mr-1" /> 绑定
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="px-5 text-sm flex-1 h-full"
+                      onClick={() => {
+                        if (bindTimerRef.current) clearTimeout(bindTimerRef.current)
+                        setTrackingNo('')
+                        setTrackingBound(false)
+                        setTimeout(() => trackingInputRef.current?.focus(), 30)
+                      }}
+                    >
+                      <X className="h-4 w-4 mr-1" /> 清空
+                    </Button>
+                  </div>
+                </>
               ) : (
-                <div className="text-xs text-muted-foreground">
-                  💡 未绑定单号也可以出库（普通出库）；绑定后所有清单产品会关联该单号
-                </div>
+                <>
+                  <Label htmlFor="offline_note" className="text-sm font-medium">
+                    客户名 / 用途（可选，写入备注）
+                  </Label>
+                  <Input
+                    id="offline_note"
+                    value={offlineNote}
+                    onChange={(e) => setOfflineNote(e.target.value)}
+                    placeholder="例如：张老板、某某公司、自提等"
+                    className="h-11"
+                  />
+                  <div className="flex-1" />
+                </>
               )}
             </div>
-          ) : (
-            <div className="space-y-2">
-              <Label htmlFor="offline_note" className="text-sm font-medium">
-                客户名 / 用途（可选，写入备注）
+
+            {/* 右列：出库人 */}
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="operator_name" className="text-sm font-medium">
+                出库人 <span className="text-xs text-muted-foreground">（可选）</span>
               </Label>
               <Input
-                id="offline_note"
-                value={offlineNote}
-                onChange={(e) => setOfflineNote(e.target.value)}
-                placeholder="例如：张老板、某某公司、自提、某某展会赠品等"
-                className="h-11"
-              />
-              <div className="flex items-center gap-2 text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
-                <Check className="h-4 w-4 text-emerald-600 flex-shrink-0" />
-                <span>线下交易模式：所有清单产品会标记为「线下」，不写入快递单号</span>
-              </div>
-            </div>
-          )}
-
-          {/* 出库人选择：同一账号支持多个不同出库人 */}
-          <div className="space-y-2 pt-2 border-t">
-            <Label htmlFor="operator_name" className="text-sm font-medium">
-              出库人 <span className="text-xs text-muted-foreground">（可选：下拉选择或手填新名字）</span>
-            </Label>
-            <div className="flex gap-2">
-              <Input
                 id="operator_name"
-                list="operator_name_list"
                 value={operatorName}
                 onChange={(e) => setOperatorName(e.target.value)}
-                placeholder="例：张三；多人共用一个账号时在此区分"
+                placeholder="例：张三；或点下方按钮"
                 className="h-11"
               />
-              <datalist id="operator_name_list">
-                {operatorListOptions.map((name) => (
-                  <option key={name} value={name}>{name}</option>
+              {/* 6个快捷名字按钮，3列2行整齐排列 */}
+              <div className="grid grid-cols-3 gap-2 flex-1">
+                {getSettings().outboundStaff.map((name, i) => (
+                  <Button
+                    key={i}
+                    type="button"
+                    variant={name && operatorName === name ? 'default' : 'outline'}
+                    size="sm"
+                    className={`h-full px-2 text-sm ${!name ? 'opacity-50 border-dashed' : ''}`}
+                    disabled={!name}
+                    onClick={() => name && setOperatorName(operatorName === name ? '' : name)}
+                    title={name ? name : '未设置，请到设置页配置'}
+                  >
+                    {name || `${i + 1}`}
+                  </Button>
                 ))}
-              </datalist>
+              </div>
             </div>
           </div>
+
+          {/* 已绑定单号提示 */}
+          {shipMode === 'online' && trackingBound && (
+            <div className="flex items-center gap-2 text-sm text-green-800 bg-green-50 border border-green-200 rounded-lg px-3 py-2 mt-2">
+              <Check className="h-4 w-4 text-green-600 flex-shrink-0" />
+              <span>已绑定单号：</span>
+              <span className="font-mono font-bold tracking-wide">{trackingNo.trim()}</span>
+              <span className="text-green-600/80 text-xs ml-auto">本单所有产品将自动带上此单号</span>
+            </div>
+          )}
+          {shipMode === 'online' && !trackingBound && (
+            <div className="text-xs text-muted-foreground mt-2">
+              💡 未绑定单号也可以出库（普通出库）；绑定后所有清单产品会关联该单号
+            </div>
+          )}
+          {shipMode === 'offline' && (
+            <div className="flex items-center gap-2 text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 mt-2">
+              <Check className="h-4 w-4 text-emerald-600 flex-shrink-0" />
+              <span>线下交易模式：所有清单产品会标记为「线下」，不写入快递单号</span>
+            </div>
+          )}
         </CardContent>
       </Card>
 

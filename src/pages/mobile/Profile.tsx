@@ -39,7 +39,7 @@ export default function MobileProfile() {
     const list: EntryItem[] = [
       {
         to: '/m/moves',
-        label: '进出库记录',
+        label: '进出库管理',
         desc: '最近出入库流水',
         icon: List,
         iconClass: 'text-slate-600',

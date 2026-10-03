@@ -14,6 +14,7 @@ import {
   Trash2,
   RotateCcw,
   RotateCw,
+  Users,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import {
@@ -333,6 +334,37 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* ========== 出库人快捷名单 ========== */}
+      {canManageUsers() && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Users className="h-5 w-5" />
+              出库人快捷名单
+            </CardTitle>
+            <CardDescription>设置 6 个常用出库人名字，出库页可一键点选（留空则为灰色占位）</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {settings.outboundStaff.map((name, i) => (
+                <div className="space-y-1.5" key={i}>
+                  <Label className="text-xs text-muted-foreground">出库人 {i + 1}</Label>
+                  <Input
+                    value={name}
+                    onChange={(e) => {
+                      const next = [...settings.outboundStaff]
+                      next[i] = e.target.value
+                      update({ outboundStaff: next })
+                    }}
+                    placeholder={`名字 ${i + 1}`}
+                  />
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* ========== 成本权限 ========== */}
       {canManageUsers() && (
