@@ -43,7 +43,7 @@ export const LOW_STOCK_THRESHOLD_CRITICAL = 5
 export const DAYS_THRESHOLD_WARNING = 15
 export const DAYS_THRESHOLD_DANGER = 7
 export const DAYS_THRESHOLD_CRITICAL = 3
-export const OUT_30_DAYS_WINDOW = 60
+export const OUT_30_DAYS_WINDOW = 30
 
 function getThresholds() {
   const s = getSettings()
