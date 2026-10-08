@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { supabase } from '@/lib/supabase'
-import { getSettings } from '@/lib/settings'
+import { getSettings, syncOutboundStaffFromDB } from '@/lib/settings'
 import type { UserRole, Profile } from '@/types'
 
 interface AuthState {
@@ -36,6 +36,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         .eq('id', user.id)
         .single()
       set({ user, profile: profile || null })
+      // 从数据库同步出库人名单到本地（换电脑也能看到）
+      await syncOutboundStaffFromDB(user.id)
     } else {
       set({ user: null, profile: null })
     }

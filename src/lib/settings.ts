@@ -123,6 +123,57 @@ export function initTheme() {
   applyTheme(s.theme)
 }
 
+// ============ 出库人名单：云端同步 ============
+import { supabase, columnExists } from './supabase'
+
+/**
+ * 从数据库 profiles 表读取出库人名单，同步到 localStorage。
+ * 登录后调用一次，保证换电脑也能看到同一份名单。
+ */
+export async function syncOutboundStaffFromDB(userId: string): Promise<void> {
+  try {
+    const hasCol = await columnExists('profiles', 'outbound_staff')
+    if (!hasCol) return
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('outbound_staff')
+      .eq('id', userId)
+      .single()
+    if (error) return
+    const dbStaff = data?.outbound_staff
+    if (Array.isArray(dbStaff)) {
+      const current = getSettings()
+      // 只在数据库非空时覆盖本地；若本地有值而数据库为空，保留本地（首次迁移）
+      const hasLocalValue = current.outboundStaff.some((s) => s.trim() !== '')
+      const hasDbValue = dbStaff.some((s: string) => s && s.trim() !== '')
+      if (hasDbValue || !hasLocalValue) {
+        const padded = [...dbStaff]
+        while (padded.length < 6) padded.push('')
+        saveSettings({ outboundStaff: padded.slice(0, 6) })
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * 把出库人名单保存到数据库 profiles 表。
+ * 设置页修改时调用，同时存本地和云端。
+ */
+export async function saveOutboundStaffToDB(userId: string, staff: string[]): Promise<void> {
+  try {
+    const hasCol = await columnExists('profiles', 'outbound_staff')
+    if (!hasCol) return
+    await supabase
+      .from('profiles')
+      .update({ outbound_staff: staff })
+      .eq('id', userId)
+  } catch {
+    /* ignore */
+  }
+}
+
 // ============ 导出 CSV 辅助 ============
 export function downloadCSV(filename: string, rows: (string | number)[][]) {
   const csv = rows

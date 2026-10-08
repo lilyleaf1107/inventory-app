@@ -23,6 +23,7 @@ import {
   resetSettings,
   applyTheme,
   downloadCSV,
+  saveOutboundStaffToDB,
   type AppSettings,
   type ThemeName,
   THEMES,
@@ -37,7 +38,7 @@ import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 
 export default function SettingsPage() {
-  const { isSuperAdmin, canManageUsers } = useAuthStore()
+  const { isSuperAdmin, canManageUsers, user } = useAuthStore()
   const queryClient = useQueryClient()
   const [settings, setSettings] = useState<AppSettings>(() => getSettings())
 
@@ -59,7 +60,11 @@ export default function SettingsPage() {
       queryClient.invalidateQueries({ queryKey: ['low-stock'] })
       queryClient.invalidateQueries({ queryKey: ['inventory'] })
     }
-  }, [queryClient])
+    // 出库人名单变更时同步到云端
+    if (patch.outboundStaff && user?.id) {
+      saveOutboundStaffToDB(user.id, patch.outboundStaff)
+    }
+  }, [queryClient, user?.id])
 
   // ========== 外观 ==========
   const handleThemeChange = (theme: ThemeName) => {

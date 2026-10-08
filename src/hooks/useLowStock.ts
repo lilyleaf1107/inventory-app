@@ -68,21 +68,31 @@ export function calcStockAlert(quantity: number, outQty30d: number | undefined |
   const out30 = Number(outQty30d) || 0
   const dailyAvg = out30 / OUT_30_DAYS_WINDOW
 
+  // 先用固定数量阈值算一个等级（任何情况下都生效）
+  const t = getThresholds()
+  let qtyLevel: LowStockLevel = 'normal'
+  if (quantity <= t.critical) qtyLevel = 'critical'
+  else if (quantity <= t.danger) qtyLevel = 'danger'
+  else if (quantity <= t.warning) qtyLevel = 'warning'
+
   if (out30 > 0) {
     const days = quantity / dailyAvg
-    let level: LowStockLevel = 'normal'
-    if (days <= DAYS_THRESHOLD_CRITICAL) level = 'critical'
-    else if (days <= DAYS_THRESHOLD_DANGER) level = 'danger'
-    else if (days <= DAYS_THRESHOLD_WARNING) level = 'warning'
+    let daysLevel: LowStockLevel = 'normal'
+    if (days <= DAYS_THRESHOLD_CRITICAL) daysLevel = 'critical'
+    else if (days <= DAYS_THRESHOLD_DANGER) daysLevel = 'danger'
+    else if (days <= DAYS_THRESHOLD_WARNING) daysLevel = 'warning'
+    // 取数量阈值和可售天数中更严重的等级
+    const level = moreSevere(qtyLevel, daysLevel)
     return { level, dailyAvg, sellableDays: days, usesFallback: false }
   }
 
-  const t = getThresholds()
-  let level: LowStockLevel = 'normal'
-  if (quantity <= t.critical) level = 'critical'
-  else if (quantity <= t.danger) level = 'danger'
-  else if (quantity <= t.warning) level = 'warning'
-  return { level, dailyAvg: 0, sellableDays: null, usesFallback: true }
+  return { level: qtyLevel, dailyAvg: 0, sellableDays: null, usesFallback: true }
+}
+
+/** 返回两个等级中更严重的那个 */
+function moreSevere(a: LowStockLevel, b: LowStockLevel): LowStockLevel {
+  const rank: Record<LowStockLevel, number> = { out: 0, critical: 1, danger: 2, warning: 3, normal: 4 }
+  return rank[a] <= rank[b] ? a : b
 }
 
 /** 将 products.manual_status 映射为等级 */
@@ -240,8 +250,6 @@ export function useLowStock() {
         if (level === 'normal') continue
         if (level === 'out') continue
         const alert = calcStockAlert(qty, out30)
-        // 无销售数据（回退固定阈值）的不进入预警列表
-        if (alert.usesFallback) continue
         items.push({
           id: String(row.id),
           quantity: qty,
@@ -340,7 +348,6 @@ export function useLowStockCountLight() {
         const out30 = vMap.get(r.product_id as string) || 0
         const alert = calcStockAlert(qty, out30)
         if (alert.level === 'out') continue
-        if (alert.usesFallback) continue
         if (alert.level !== 'normal') total++
       }
       return total

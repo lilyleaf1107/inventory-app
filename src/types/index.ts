@@ -5,6 +5,7 @@ export interface Profile {
   name: string | null
   role: UserRole
   created_at: string
+  outbound_staff?: string[] | null
 }
 
 export interface Product {
