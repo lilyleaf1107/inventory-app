@@ -21,6 +21,7 @@ export default function MobileLowStock() {
   const { data: lowStockItems, isLoading } = useLowStock()
   const [page, setPage] = useState(1)
   const [activeLevel, setActiveLevel] = useState<'warning' | 'danger' | 'critical' | null>(null)
+  const [activeTab, setActiveTab] = useState<'qty' | 'days'>('qty')
 
   const filteredList = useMemo(() => {
     if (!lowStockItems) return []
@@ -31,13 +32,19 @@ export default function MobileLowStock() {
     }) === activeLevel)
   }, [lowStockItems, activeLevel])
 
-  const total = filteredList.length
+  // 按 Tab（预警原因）再过滤一层
+  const tabFilteredList = useMemo(
+    () => filteredList.filter((i) => i.triggerReason === activeTab),
+    [filteredList, activeTab],
+  )
+
+  const total = tabFilteredList.length
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
-  useMemo(() => { setPage(1) }, [total, activeLevel]) // 数据/筛选变→回第 1 页
+  useMemo(() => { setPage(1) }, [total, activeLevel, activeTab]) // 数据/筛选/Tab 变→回第 1 页
 
   const pagedList = useMemo(
-    () => filteredList.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
-    [filteredList, page],
+    () => tabFilteredList.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [tabFilteredList, page],
   )
 
   const stats = {
@@ -46,6 +53,10 @@ export default function MobileLowStock() {
     danger: lowStockItems?.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d, { trackQty: i.product.track_qty !== false, manualStatus: i.product.manual_status ?? null }) === 'danger').length || 0,
     critical: lowStockItems?.filter((i) => getLowStockLevelV2(i.quantity, i.outQty30d, { trackQty: i.product.track_qty !== false, manualStatus: i.product.manual_status ?? null }) === 'critical').length || 0,
   }
+
+  // Tab 上显示的数量（基于当前等级筛选后的结果）
+  const qtyCount = filteredList.filter((i) => i.triggerReason === 'qty').length
+  const daysCount = filteredList.filter((i) => i.triggerReason === 'days').length
 
   return (
     <div className="flex flex-col h-full">
@@ -104,11 +115,27 @@ export default function MobileLowStock() {
           </CardContent></Card>
         </div>
 
+        {/* Tab 切换：两类预警分开显示 */}
+        <div className="px-3 pb-2 grid grid-cols-2 gap-2">
+          <button
+            onClick={() => setActiveTab('qty')}
+            className={`py-2.5 rounded-lg font-medium text-sm transition-colors ${activeTab === 'qty' ? 'bg-orange-500 text-white' : 'bg-muted text-muted-foreground'}`}
+          >
+            数量不足（{qtyCount}）
+          </button>
+          <button
+            onClick={() => setActiveTab('days')}
+            className={`py-2.5 rounded-lg font-medium text-sm transition-colors ${activeTab === 'days' ? 'bg-orange-500 text-white' : 'bg-muted text-muted-foreground'}`}
+          >
+            销售告急（{daysCount}）
+          </button>
+        </div>
+
         {/* 列表 */}
         <div className="px-3 pb-3 space-y-2">
           {isLoading ? (
             <div className="text-center py-12 text-muted-foreground text-sm">加载中...</div>
-          ) : filteredList.length === 0 ? (
+          ) : tabFilteredList.length === 0 ? (
             <div className="text-center py-16">
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-50 mx-auto mb-3">
                 <Package className="h-8 w-8 text-green-500" />

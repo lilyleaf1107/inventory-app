@@ -32,6 +32,8 @@ export interface LowStockItem {
   usesFallback?: boolean
   /** track_qty=false 时，用 manual_status 覆盖等级；这里明确写出真实等级来源 */
   manualOverrideLevel?: LowStockLevel | null
+  /** 触发预警的原因：qty=数量不足，days=可售天数少 */
+  triggerReason?: 'qty' | 'days'
 }
 
 export type LowStockLevel = 'normal' | 'warning' | 'danger' | 'critical' | 'out'
@@ -59,11 +61,13 @@ export interface StockAlertResult {
   dailyAvg: number
   sellableDays: number | null
   usesFallback: boolean
+  /** 触发预警的原因：qty=数量不足，days=可售天数少 */
+  triggerReason: 'qty' | 'days'
 }
 
 export function calcStockAlert(quantity: number, outQty30d: number | undefined | null): StockAlertResult {
   if (quantity <= 0) {
-    return { level: 'out', dailyAvg: 0, sellableDays: 0, usesFallback: false }
+    return { level: 'out', dailyAvg: 0, sellableDays: 0, usesFallback: false, triggerReason: 'qty' }
   }
   const out30 = Number(outQty30d) || 0
   const dailyAvg = out30 / OUT_30_DAYS_WINDOW
@@ -83,16 +87,21 @@ export function calcStockAlert(quantity: number, outQty30d: number | undefined |
     else if (days <= DAYS_THRESHOLD_WARNING) daysLevel = 'warning'
     // 取数量阈值和可售天数中更严重的等级
     const level = moreSevere(qtyLevel, daysLevel)
-    return { level, dailyAvg, sellableDays: days, usesFallback: false }
+    // 分组规则：可售天数触发了预警（≤15天）→ 销售速度告急；否则 → 库存数量不足
+    const triggerReason: 'qty' | 'days' = daysLevel !== 'normal' ? 'days' : 'qty'
+    return { level, dailyAvg, sellableDays: days, usesFallback: false, triggerReason }
   }
 
-  return { level: qtyLevel, dailyAvg: 0, sellableDays: null, usesFallback: true }
+  return { level: qtyLevel, dailyAvg: 0, sellableDays: null, usesFallback: true, triggerReason: 'qty' }
+}
+
+function rankOf(level: LowStockLevel): number {
+  return { out: 0, critical: 1, danger: 2, warning: 3, normal: 4 }[level]
 }
 
 /** 返回两个等级中更严重的那个 */
 function moreSevere(a: LowStockLevel, b: LowStockLevel): LowStockLevel {
-  const rank: Record<LowStockLevel, number> = { out: 0, critical: 1, danger: 2, warning: 3, normal: 4 }
-  return rank[a] <= rank[b] ? a : b
+  return rankOf(a) <= rankOf(b) ? a : b
 }
 
 /** 将 products.manual_status 映射为等级 */
@@ -262,6 +271,7 @@ export function useLowStock() {
           sellableDays: alert.sellableDays ?? undefined,
           usesFallback: alert.usesFallback,
           manualOverrideLevel: !trackQty && prod.manual_status ? level : null,
+          triggerReason: !trackQty && prod.manual_status ? 'qty' : alert.triggerReason,
         })
       }
 
