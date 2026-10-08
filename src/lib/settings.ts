@@ -141,16 +141,18 @@ export async function syncOutboundStaffFromDB(userId: string): Promise<void> {
       .single()
     if (error) return
     const dbStaff = data?.outbound_staff
-    if (Array.isArray(dbStaff)) {
-      const current = getSettings()
-      // 只在数据库非空时覆盖本地；若本地有值而数据库为空，保留本地（首次迁移）
-      const hasLocalValue = current.outboundStaff.some((s) => s.trim() !== '')
-      const hasDbValue = dbStaff.some((s: string) => s && s.trim() !== '')
-      if (hasDbValue || !hasLocalValue) {
-        const padded = [...dbStaff]
-        while (padded.length < 6) padded.push('')
-        saveSettings({ outboundStaff: padded.slice(0, 6) })
-      }
+    const current = getSettings()
+    const hasLocalValue = current.outboundStaff.some((s) => s.trim() !== '')
+    const hasDbValue = Array.isArray(dbStaff) && dbStaff.some((s: string) => s && s.trim() !== '')
+
+    if (hasDbValue) {
+      // 数据库有值 → 用数据库覆盖本地（换电脑场景）
+      const padded = [...(dbStaff as string[])]
+      while (padded.length < 6) padded.push('')
+      saveSettings({ outboundStaff: padded.slice(0, 6) })
+    } else if (hasLocalValue) {
+      // 数据库为空但本地有值 → 把本地推送到云端（首次迁移）
+      await saveOutboundStaffToDB(userId, current.outboundStaff)
     }
   } catch {
     /* ignore */
