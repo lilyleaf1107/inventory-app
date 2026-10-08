@@ -250,6 +250,8 @@ export function useLowStock() {
         if (level === 'normal') continue
         if (level === 'out') continue
         const alert = calcStockAlert(qty, out30)
+        // 无销售数据（回退固定阈值）的不进入预警列表，避免冷门配件刷屏
+        if (alert.usesFallback) continue
         items.push({
           id: String(row.id),
           quantity: qty,
@@ -348,6 +350,7 @@ export function useLowStockCountLight() {
         const out30 = vMap.get(r.product_id as string) || 0
         const alert = calcStockAlert(qty, out30)
         if (alert.level === 'out') continue
+        if (alert.usesFallback) continue
         if (alert.level !== 'normal') total++
       }
       return total
